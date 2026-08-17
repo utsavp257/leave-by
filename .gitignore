@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Cached pulls from TLC and the state open data portal. Rebuilt on demand and
+# far too big to track; the small aggregates under site/data are what ship.
+data/
