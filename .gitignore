@@ -4,5 +4,6 @@ __pycache__/
 .pytest_cache/
 
 # Cached pulls from TLC and the state open data portal. Rebuilt on demand and
-# far too big to track; the small aggregates under site/data are what ship.
-data/
+# far too big to track. Anchored to the root on purpose: an unanchored `data/`
+# would also swallow site/data, which is exactly what does need committing.
+/data/
