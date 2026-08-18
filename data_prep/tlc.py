@@ -32,7 +32,9 @@ and dropoff timestamps before any month is accepted.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -198,6 +200,47 @@ def fetch_month(con, source: Source, year: int, month: int) -> int:
     return written
 
 
+def http_status(exc) -> int | None:
+    """The status code behind a DuckDB HTTP error, however it is reported."""
+    code = getattr(exc, "status_code", None)
+    if isinstance(code, int):
+        return code
+    found = re.search(r"\b([45]\d\d)\b", str(exc))
+    return int(found.group(1)) if found else None
+
+
+def fetch_with_retry(con, source: Source, year: int, month: int, attempts: int = 4):
+    """Fetch a month, telling "not published yet" apart from "slow down".
+
+    This distinction matters more than it looks. DuckDB's HTTPException is a
+    subclass of IOException, so a single `except IOException` swallows a 403 from
+    the CDN and reports it as a missing month. Across a long backfill that
+    quietly drops data and still exits zero, leaving a corpus with holes in it
+    that nothing downstream can detect.
+
+    A 404 is genuinely absent - TLC publishes about two months behind - and is
+    reported as skipped. Throttling and server errors are retried with a
+    lengthening pause, and if they survive that they are raised, because a
+    backfill that silently loses a year is worse than one that stops.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return fetch_month(con, source, year, month), None
+        except duckdb.HTTPException as exc:
+            status = http_status(exc)
+            if status == 404:
+                return None, "not published yet"
+            if attempt == attempts:
+                raise RuntimeError(
+                    f"{source.name} {year}-{month:02d}: HTTP {status} after "
+                    f"{attempts} attempts. Stopping rather than leaving a hole."
+                ) from exc
+            pause = 5 * 2 ** (attempt - 1)
+            print(f"{source.name} {year}-{month:02d}  HTTP {status}, retrying in {pause}s")
+            time.sleep(pause)
+    return None, "unreachable"
+
+
 def months(start: str, end: str):
     """Inclusive range of YYYY-MM strings."""
     sy, sm = (int(p) for p in start.split("-"))
@@ -225,19 +268,31 @@ def main(argv=None) -> int:
     source = SOURCES[args.source]
     con = connect()
 
+    fetched = cached = 0
+    skipped = []
+
     for year, month in months(args.start, args.end or args.start):
         out = CACHE / f"{source.name}_{year:04d}-{month:02d}.parquet"
         if out.exists() and not args.force:
             print(f"{source.name} {year}-{month:02d}  cached")
+            cached += 1
             continue
-        try:
-            rows, trips = fetch_month(con, source, year, month)
-        except duckdb.IOException as exc:
-            # A month that is not published yet is expected, not an error. TLC
-            # runs about two months behind.
-            print(f"{source.name} {year}-{month:02d}  unavailable ({exc.__class__.__name__})")
+
+        result, reason = fetch_with_retry(con, source, year, month)
+        if result is None:
+            print(f"{source.name} {year}-{month:02d}  skipped ({reason})")
+            skipped.append(f"{year}-{month:02d} ({reason})")
             continue
+
+        rows, trips = result
         print(f"{source.name} {year}-{month:02d}  {rows:>7,} bins  {trips:>9,} trips")
+        fetched += 1
+
+    print(f"\n{fetched} fetched, {cached} already cached, {len(skipped)} skipped")
+    if skipped:
+        # Named rather than counted, so a hole in the corpus is visible in the
+        # log instead of being inferred later from a thin-looking map.
+        print("skipped: " + ", ".join(skipped))
 
     return 0
 
