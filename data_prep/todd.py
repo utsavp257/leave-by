@@ -80,6 +80,7 @@ def build(windows: dict, pause: float) -> dict:
         start, end = windows[source]
         samples: list[float] = []
         used: list[str] = []
+        by_month: dict[str, dict] = {}
         for year, month in months(start, end):
             label = f"{year:04d}-{month:02d}"
             got, reason = read_with_retry(
@@ -91,6 +92,10 @@ def build(windows: dict, pause: float) -> dict:
             if got:
                 samples.extend(got)
                 used.append(label)
+                by_month[label] = {
+                    "median": round(statistics.median(got)),
+                    "trips": len(got),
+                }
                 print(f"{source} {label}  {len(got):>5} trips", flush=True)
             time.sleep(pause)
 
@@ -105,6 +110,12 @@ def build(windows: dict, pause: float) -> dict:
             "trips": len(samples),
             "months": used,
             "window": f"{used[0]} to {used[-1]}" if used else None,
+            # Kept per month so a later question about a different window can be
+            # answered without refetching, and so two modes gathered over
+            # different spans can be compared over their overlap. The first
+            # version stored only the pooled median, which made a mode
+            # comparison across mismatched windows impossible to check.
+            "by_month": by_month,
         }
         result["months"] = sorted(set(result["months"]) | set(used))
 
