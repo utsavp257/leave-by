@@ -21,6 +21,10 @@ on:
       end:
         description: "Last month to fetch, as YYYY-MM"
         required: true
+      todd:
+        description: "Also recompute the Midtown-to-JFK 10am comparison"
+        required: false
+        default: "false"
 
 permissions:
   contents: write
@@ -81,6 +85,12 @@ jobs:
         with:
           path: data
           key: tlc-months-${{ github.run_id }}
+
+      # Off by default. It re-reads whole months to answer one cell, which is
+      # worth doing occasionally and wasteful to do monthly.
+      - name: Then-and-now comparison
+        if: github.event.inputs.todd == 'true'
+        run: python -m data_prep.todd --fhvhv 2025-06 2026-05 --yellow 2024-01 2026-05
 
       - name: Rebuild
         run: |

@@ -45,12 +45,15 @@ const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 /* ── boot ─────────────────────────────────────────────────── */
 
 async function boot() {
-  const [data, map] = await Promise.all([
+  const [data, map, todd] = await Promise.all([
     fetch("data/leaveby.json").then((r) => r.json()),
     fetch("data/map.json").then((r) => r.json()),
+    // Optional: the page still reads correctly without it.
+    fetch("data/todd.json").then((r) => (r.ok ? r.json() : null)).catch(() => null),
   ]);
   state.data = data;
   state.map = map;
+  if (todd) fillEras(todd);
 
   buildSegmented("airport", airportsAvailable(), (a) => a, "airport");
   buildSegmented("block", data.blocks, (b) => BLOCK_LABELS[b] || b, "block");
@@ -507,6 +510,74 @@ function countTo(node, target) {
   // Phones throttle animation frames hard when a tab is busy or backgrounded.
   // A stalled count would otherwise leave a wrong number on screen for good.
   setTimeout(finish, duration + 400);
+}
+
+/* The then-and-now rows, filled from the measured cell.
+ *
+ * Sample size is printed beside each one because the two modes are not equally
+ * common on this route: ride-hail runs it a few hundred times over the window,
+ * yellow cabs a few dozen. A reader deserves to see which median is thin. */
+function fillEras(todd) {
+  const scale = 90;
+  const rows = {
+    todd: { minutes: todd.todd_minutes, note: "Measured by Todd Schneider from 1.1 billion trips." },
+  };
+  for (const [source, values] of Object.entries(todd.modes || {})) {
+    // Derived from the month list rather than read from a field, so an older
+    // todd.json without one still labels itself correctly.
+    const span = describeMonths(values.months);
+    rows[source] = {
+      minutes: values.median,
+      note: `${values.trips.toLocaleString()} trips, ${span}.`,
+      window: span,
+    };
+  }
+
+  for (const [era, row] of Object.entries(rows)) {
+    const node = document.querySelector(`[data-era="${era}"]`);
+    if (!node || row.minutes == null) continue;
+    node.querySelector(".tn-fill").dataset.width = String(
+      Math.min(100, (row.minutes / scale) * 100)
+    );
+    const value = node.querySelector(".tn-value");
+    value.dataset.count = String(row.minutes);
+    value.textContent = String(row.minutes);
+    node.querySelector(".tn-note").textContent = row.note;
+    if (era !== "todd" && row.window) {
+      node.querySelector(".tn-when").textContent =
+        `${era === "fhvhv" ? "Uber and Lyft" : "Yellow cab"}, ${row.window}`;
+    }
+  }
+
+  const note = el("todd-note");
+  if (note) {
+    const ride = todd.modes && todd.modes.fhvhv;
+    note.textContent = ride
+      ? `All three are the same cell: Midtown Center to JFK, leaving between ` +
+        `${todd.hour} and ${todd.hour + 1} in the morning, weekdays only. Todd's ` +
+        `figure averages ${todd.todd_window}, so read the gap as a decade of ` +
+        `drift rather than a single event — ride-hail growth, delivery traffic ` +
+        `and street redesign all sit inside it. The rest of this page uses the ` +
+        `full corpus of ${state.data.built_from.car.weekday_trips.toLocaleString()} ` +
+        `weekday trips.`
+      : "";
+  }
+}
+
+/* "2026-01".."2026-05" -> "Jan to May 2026". A date range a reader can hold. */
+function describeMonths(months) {
+  if (!months || !months.length) return "";
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const part = (m) => {
+    const [y, mm] = m.split("-");
+    return { year: y, name: names[Number(mm) - 1] };
+  };
+  const first = part(months[0]);
+  const last = part(months[months.length - 1]);
+  if (months.length === 1) return `${first.name} ${first.year}`;
+  if (first.year === last.year) return `${first.name} to ${last.name} ${first.year}`;
+  return `${first.name} ${first.year} to ${last.name} ${last.year}`;
 }
 
 function revealOnScroll() {

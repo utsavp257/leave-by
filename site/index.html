@@ -95,7 +95,9 @@
     </div>
 
     <div class="then-now rise" id="then-now">
-      <div class="tn-row">
+      <!-- Rows are filled from data/todd.json, so the comparison is measured
+           rather than asserted. Values here are a readable fallback only. -->
+      <div class="tn-row" data-era="todd">
         <div class="tn-head">
           <span class="tn-when">Taxi, 2009–2015</span>
           <span class="tn-note">Measured by Todd Schneider from 1.1 billion trips.</span>
@@ -105,24 +107,24 @@
           <span class="tn-value" data-count="38">38</span>
         </div>
       </div>
-      <div class="tn-row tn-row-now">
+      <div class="tn-row tn-row-now" data-era="fhvhv">
         <div class="tn-head">
-          <span class="tn-when">Uber and Lyft, April 2026</span>
-          <span class="tn-note">Same origin zone, same hour, same 17.2 miles.</span>
+          <span class="tn-when">Uber and Lyft</span>
+          <span class="tn-note"></span>
         </div>
         <div class="tn-plot">
-          <div class="tn-track"><div class="tn-fill tn-fill-now" data-width="68.9"></div></div>
-          <span class="tn-value" data-count="62">62</span>
+          <div class="tn-track"><div class="tn-fill tn-fill-now" data-width="0"></div></div>
+          <span class="tn-value" data-count="0">—</span>
         </div>
       </div>
-      <div class="tn-row">
+      <div class="tn-row" data-era="yellow">
         <div class="tn-head">
-          <span class="tn-when">Yellow cab, April 2026</span>
-          <span class="tn-note">Checked separately, in case the app was the problem. It is not.</span>
+          <span class="tn-when">Yellow cab</span>
+          <span class="tn-note"></span>
         </div>
         <div class="tn-plot">
-          <div class="tn-track"><div class="tn-fill tn-fill-past" data-width="65.6"></div></div>
-          <span class="tn-value" data-count="59">59</span>
+          <div class="tn-track"><div class="tn-fill tn-fill-past" data-width="0"></div></div>
+          <span class="tn-value" data-count="0">—</span>
         </div>
       </div>
       <div class="tn-axis"><div class="tn-axis-inner">
@@ -138,12 +140,7 @@
     than a single event. Ride-hail growth, delivery traffic and street redesign
     all sit inside it, and this page does not try to separate them.</p>
 
-    <p class="footnote rise">The 2026 figures are one month, matched to Todd's
-    hour. April was not a bad month picked to flatter the comparison: across all
-    41 months on this page, the same trip has a midday median of 68 minutes
-    against April's 70, so April runs about three per cent slow. The rest of the
-    page uses the full corpus — 30,299,314 weekday trips from January 2023 to
-    May 2026.</p>
+    <p class="footnote rise" id="todd-note"></p>
   </div>
 </section>
 
