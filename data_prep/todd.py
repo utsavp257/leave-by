@@ -27,7 +27,7 @@ from pathlib import Path
 
 import duckdb
 
-from data_prep.tlc import BASE, months
+from data_prep.tlc import BASE, months, read_with_retry
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "site" / "data"
@@ -72,24 +72,34 @@ def build(windows: dict, pause: float) -> dict:
               "todd_minutes": TODD_MINUTES, "todd_window": TODD_WINDOW,
               "months": [], "modes": {}}
 
-    for source, (start, end) in windows.items():
+    # Yellow first, deliberately. Its monthly file is a seventh the size of the
+    # ride-hail one, and running the big reads first exhausted the CDN's patience
+    # before the small ones got a turn - so the cheap half was lost to the
+    # expensive half's throttling.
+    for source in sorted(windows, key=lambda s: 0 if s == "yellow" else 1):
+        start, end = windows[source]
         samples: list[float] = []
         used: list[str] = []
         for year, month in months(start, end):
             label = f"{year:04d}-{month:02d}"
-            try:
-                got = fetch(con, source, label)
-            except duckdb.HTTPException as exc:
-                print(f"{source} {label}  unavailable ({exc.__class__.__name__})")
+            got, reason = read_with_retry(
+                lambda: fetch(con, source, label), f"{source} {label}"
+            )
+            if got is None:
+                print(f"{source} {label}  skipped ({reason})", flush=True)
                 continue
             if got:
                 samples.extend(got)
                 used.append(label)
-                print(f"{source} {label}  {len(got):>5} trips")
+                print(f"{source} {label}  {len(got):>5} trips", flush=True)
             time.sleep(pause)
 
         if not samples:
-            raise RuntimeError(f"{source}: no trips found for hour {HOUR}")
+            # One source failing must not discard the other's work. An earlier
+            # version raised here and threw away twelve months of ride-hail
+            # reads because the yellow half was throttled.
+            print(f"{source}: nothing collected for hour {HOUR} - leaving it out")
+            continue
         result["modes"][source] = {
             "median": round(statistics.median(samples)),
             "trips": len(samples),
@@ -97,6 +107,9 @@ def build(windows: dict, pause: float) -> dict:
             "window": f"{used[0]} to {used[-1]}" if used else None,
         }
         result["months"] = sorted(set(result["months"]) | set(used))
+
+    if not result["modes"]:
+        raise RuntimeError("no source produced any trips - nothing to write")
 
     for source, values in result["modes"].items():
         change = values["median"] / TODD_MINUTES - 1

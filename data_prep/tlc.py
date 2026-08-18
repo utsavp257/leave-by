@@ -254,6 +254,29 @@ def http_status(exc) -> int | None:
     return int(found.group(1)) if found else None
 
 
+def read_with_retry(read, label: str, attempts: int = 5):
+    """Run a remote read, telling "not there" apart from "slow down".
+
+    Shared rather than reimplemented. The distinction was originally worked out
+    for the monthly corpus fetch and then quietly lost when a second reader was
+    written from scratch, which reported every throttle as a missing month.
+    Returns (result, reason): reason is set only when the data is genuinely absent.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return read(), None
+        except duckdb.HTTPException as exc:
+            status = http_status(exc)
+            if status == 404:
+                return None, "not published yet"
+            if attempt == attempts:
+                return None, f"HTTP {status} after {attempts} attempts"
+            pause = 30 * 2 ** (attempt - 1)
+            print(f"{label}  HTTP {status}, retrying in {pause}s", flush=True)
+            time.sleep(pause)
+    return None, "unreachable"
+
+
 def fetch_with_retry(con, source: Source, year: int, month: int, attempts: int = 5):
     """Fetch a month, telling "not published yet" apart from "slow down".
 
