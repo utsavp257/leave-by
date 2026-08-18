@@ -9,7 +9,7 @@ quietly reintroduce the additive error the project exists to avoid.
 import pytest
 
 from data_prep.histogram import percentile, total
-from data_prep.rail_times import CONNECTORS, AIRTRAIN_RIDE, uniform, wait_from_median
+from data_prep.transit_times import LINKS, uniform, wait_from_median
 
 
 def test_uniform_covers_the_range_inclusively():
@@ -41,13 +41,30 @@ def test_wait_from_median_survives_a_zero_median():
     assert percentile(h, 0.5) >= 0
 
 
-def test_every_connector_has_a_modelled_airtrain_leg():
-    for connector in CONNECTORS.values():
-        assert connector in AIRTRAIN_RIDE
-        low, high = AIRTRAIN_RIDE[connector]
+def test_every_link_models_a_wait_as_a_range():
+    for links in LINKS.values():
+        for link in links:
+            low, high = link["link_wait"]
+            assert 0 <= low < high
+
+
+def test_the_airtrain_links_carry_their_own_ride_range():
+    for link in LINKS["JFK"]:
+        low, high = link["link_ride"]
         assert 0 < low < high
+
+
+def test_the_bus_links_take_their_ride_from_measured_data():
+    """LGA link rides are not hard-coded; they come from bus.json per block."""
+    for link in LINKS["LGA"]:
+        assert "link_ride" not in link
 
 
 @pytest.mark.parametrize("route", ["A", "E", "J", "Z"])
 def test_the_four_jfk_routes_are_covered(route):
-    assert route in CONNECTORS
+    assert any(route in link["routes"] for link in LINKS["JFK"])
+
+
+@pytest.mark.parametrize("route", ["7", "E", "F", "M", "R"])
+def test_the_q70_feeder_routes_are_covered(route):
+    assert any(route in link["routes"] for link in LINKS["LGA"])
