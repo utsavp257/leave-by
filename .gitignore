@@ -7,3 +7,6 @@ __pycache__/
 # far too big to track. Anchored to the root on purpose: an unanchored `data/`
 # would also swallow site/data, which is exactly what does need committing.
 /data/
+
+# macOS
+.DS_Store
