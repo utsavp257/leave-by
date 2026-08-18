@@ -225,6 +225,10 @@ h1 em {
   display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
   margin-top: 0.85rem; font-family: var(--mono); font-size: 0.66rem; color: var(--ink-3);
 }
+.segmented-small { padding: 2px; }
+.segmented-small button { font-size: 0.62rem; padding: 0.3rem 0.6rem; letter-spacing: 0.05em; }
+@media (max-width: 560px) { .map-legend { row-gap: 0.5rem; } .segmented-small { order: -1; width: 100%; } }
+
 .legend-ramp { display: flex; height: 7px; flex: 1 1 120px; min-width: 100px; border-radius: 999px; overflow: hidden; }
 .legend-ramp i { flex: 1; }
 

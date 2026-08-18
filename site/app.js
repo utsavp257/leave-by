@@ -63,7 +63,7 @@ async function boot() {
   pickDefault();
   paintMap();
   renderAnswer();
-  wireSearch();
+  wireKeyboard();
   revealOnScroll();
 }
 
@@ -87,10 +87,7 @@ function buildSegmented(id, values, label, key) {
       [...host.children].forEach((b) =>
         b.setAttribute("aria-pressed", String(b === button))
       );
-      if (key === "airport") {
-        pickDefault();
-        fillSearchOptions();
-      }
+      if (key === "airport") pickDefault();
       paintMap();
       renderAnswer();
     });
@@ -165,8 +162,6 @@ function nearestZone(event) {
 
 function select(id) {
   state.origin = id;
-  const shape = state.map.zones[id];
-  if (shape) el("search").value = shape.name;
   paintMap();
   renderAnswer();
 }
@@ -278,37 +273,54 @@ function pickDefault() {
     }
   }
   state.origin = best || Object.keys(zones)[0] || null;
-  const zone = zones[state.origin];
-  if (zone) el("search").value = zone.zone;
 }
 
-function wireSearch() {
-  fillSearchOptions();
-  const input = el("search");
-  input.addEventListener("change", () => {
-    const zones = zonesForAirport();
-    const match = Object.entries(zones).find(
-      ([, z]) => z.zone.toLowerCase() === input.value.trim().toLowerCase()
-    );
-    if (!match) return;
-    state.origin = match[0];
-    paintMap();
-    renderAnswer();
+/* Arrow keys move to the nearest neighbourhood in that direction.
+ *
+ * The text box that used to select a zone is gone, for a quieter page. A map you
+ * can only click is a map some people cannot use at all, so the map itself takes
+ * focus and the arrows walk it: the closest zone whose centre lies in the
+ * direction pressed, preferring ones nearly straight ahead over ones off to the
+ * side.
+ */
+function wireKeyboard() {
+  const steps = {
+    ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+    ArrowUp: [0, -1], ArrowDown: [0, 1],
+  };
+  el("map").addEventListener("keydown", (event) => {
+    const step = steps[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const next = neighbourTowards(step);
+    if (next) select(next);
   });
 }
 
-function fillSearchOptions() {
-  const list = el("zone-list");
-  list.innerHTML = "";
+function neighbourTowards([dx, dy]) {
+  const here = state.map.zones[state.origin];
+  if (!here || !here.c) return null;
   const zones = zonesForAirport();
-  const names = Object.values(zones)
-    .map((z) => z.zone)
-    .sort((a, b) => a.localeCompare(b));
-  for (const name of names) {
-    const option = document.createElement("option");
-    option.value = name;
-    list.appendChild(option);
+
+  let best = null;
+  let bestCost = Infinity;
+  for (const [id, shape] of Object.entries(state.map.zones)) {
+    if (id === state.origin || !shape.c) continue;
+    if (!zones[id] || valueFor(zones[id]) == null) continue;
+
+    const ox = shape.c[0] - here.c[0];
+    const oy = shape.c[1] - here.c[1];
+    const along = ox * dx + oy * dy;
+    if (along <= 0) continue;
+    const across = Math.abs(ox * dy - oy * dx);
+    // Sideways drift costs triple, so "left" does not wander diagonally.
+    const cost = along + across * 3;
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = id;
+    }
   }
+  return best;
 }
 
 /* ── the answer ───────────────────────────────────────────── */
@@ -396,7 +408,13 @@ function renderAnswer() {
     notes.push(`<span class="flag">Weaker evidence</span>The bus leg is published already averaged over a month, a weekday and an hour, which hides the worst buses.`);
   }
   if (state.airport === "EWR") {
-    notes.push(`<span class="flag">Car only</span>New Jersey Transit publishes punctuality percentages rather than journey times, so there is no honest train bar to draw.`);
+    notes.push(
+      `<span class="flag">Car only</span>You can reach Newark by train — New Jersey ` +
+      `Transit runs to the airport station in about 24 minutes — but the last mile ` +
+      `cannot be quoted right now. The AirTrain there is being rebuilt through 2030 ` +
+      `and is replaced by a shuttle bus on most weekday mornings, on a schedule that ` +
+      `shifts with the season. A number here would be wrong by next month.`
+    );
   }
   if (notes.length) {
     const evidence = document.createElement("div");

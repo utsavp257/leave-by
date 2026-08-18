@@ -33,8 +33,7 @@
       <span class="marker">Your trip</span>
       <h2 id="map-heading">Every neighbourhood, by how much it can <em>cost you</em></h2>
       <p>Each shape is a taxi zone, shaded by how long you would have to leave
-      before a flight to be safe on nine days in ten. Tap one — or focus the map
-      and walk it with the arrow keys.</p>
+      before a flight to be safe on nine days in ten. Tap one, or search for it.</p>
     </div>
 
     <div class="controls rise">
@@ -190,6 +189,12 @@
   who asked this question first.</p>
 </footer>
 
+
+<pre id="err" style="color:#f88;font:12px monospace;white-space:pre-wrap;padding:1rem">clean</pre>
+<script>
+window.addEventListener('error', e => { document.getElementById('err').textContent = 'ERROR: ' + e.message + ' @ ' + e.lineno; });
+window.addEventListener('unhandledrejection', e => { document.getElementById('err').textContent = 'REJECT: ' + (e.reason && e.reason.message || e.reason); });
+</script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -29,7 +29,13 @@ def payload():
 
 
 def test_every_id_app_js_reads_exists_in_the_html():
-    wanted = set(re.findall(r'el\("([^"]+)"\)', APP.read_text()))
+    app = APP.read_text()
+    wanted = set(re.findall(r'el\("([^"]+)"\)', app))
+    # Ids also reach el() as an argument - buildSegmented("shade", ...) looks up
+    # el("shade") internally, so the literal never appears in that form. Removing
+    # the element from the page threw on load and blanked the whole thing, and
+    # this test passed anyway. It no longer does.
+    wanted |= set(re.findall(r'buildSegmented\("([^"]+)"', app))
     html = INDEX.read_text()
     present = set(re.findall(r'id="([^"]+)"', html))
     assert wanted, "no element lookups found - has app.js changed shape?"
