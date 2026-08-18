@@ -22,8 +22,16 @@ whole day. So every figure here is a distribution, and the headline is its tail.
 That has a consequence worth stating: the mode that is quicker on a normal
 afternoon is not always the mode that gets you there. From Midtown at rush hour
 the train beats a car by roughly half an hour at the ninetieth percentile, and
-costs about a tenth as much. From most of the outer boroughs, the car wins even
-at its worst.
+costs $11.75 against a median car fare near $150 at that hour. From most of
+the outer boroughs, the car wins even at its worst.
+
+Fares, confirmed for 2026: the subway is $3.00, the AirTrain $8.75, and the Q70+
+LaGuardia Link is free — so reaching LaGuardia by transit costs a single swipe.
+Car fares are measured per neighbourhood from the trip records as medians in
+whole dollars, tips excluded. They read high against a remembered UberX price
+because the trip files carry every service tier — Black and SUV are in the same
+distribution. Worth one real-world spot check against a live quote before
+publishing.
 
 ## The data
 
@@ -79,6 +87,9 @@ python3 -m venv .venv
 
 .venv/bin/python -m pytest tests/ -q
 ```
+
+Re-fetching the same month repeatedly will eventually earn a `403` from the CDN.
+That is throttling, not a broken URL; wait, or let the cached month stand.
 
 A monthly GitHub Action does the same thing, and a manual trigger takes a month
 range for backfilling. It runs there rather than locally because the work is

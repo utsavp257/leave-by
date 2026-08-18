@@ -78,6 +78,28 @@ def test_every_zone_has_the_fields_the_page_renders(payload):
     assert checked > 100, f"only {checked} cells - the build looks thin"
 
 
+def test_fares_are_medians_not_averages(payload):
+    """A median must sit at or below the ninetieth percentile. If these ever
+    invert, something is summing where it should be counting."""
+    car = json.loads((SITE / "data" / "car.json").read_text())
+    checked = 0
+    for zones in car["cells"].values():
+        for cells in zones.values():
+            for cell in cells.values():
+                if "fare" in cell and "fare_p90" in cell:
+                    assert cell["fare"] <= cell["fare_p90"]
+                    assert cell["fare"] >= 0
+                    checked += 1
+    assert checked > 100, f"only {checked} fares found"
+
+
+def test_transit_fares_match_the_confirmed_2026_prices(payload):
+    """Subway $3.00, AirTrain $8.75, Q70+ free. Wrong fares here are the kind of
+    error a reader spots instantly and never forgives."""
+    assert payload["transit_fare_usd"]["JFK"] == 11.75
+    assert payload["transit_fare_usd"]["LGA"] == 3.0
+
+
 def test_a_cell_always_has_at_least_one_mode(payload):
     """A row with neither bar would render as two empty tracks and no verdict."""
     for zones in payload["airports"].values():

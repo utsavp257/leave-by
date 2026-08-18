@@ -51,9 +51,9 @@ MIN_SAMPLES = 30
 # Assumptions. Modelled, never measured, and each a range so it can be
 # convolved rather than added.
 #
-# Sources disagree on the AirTrain fare - $8.75 and $9.25 both appear for 2026 -
-# so it is carried as a range and must be confirmed with the Port Authority
-# before publishing. The Q70+ has been fare-free at times; confirm that too.
+# Both fares confirmed for 2026: the AirTrain is $8.75, and the Q70+ LaGuardia
+# Link is free. That makes the LaGuardia transit trip a single subway swipe,
+# which is worth saying on the page rather than burying here.
 # --------------------------------------------------------------------------
 
 TRANSFER = (3, 8)
@@ -65,8 +65,16 @@ AIRTRAIN_WAIT = (0, 10)
 Q70_WAIT = (0, 12)
 """Q70+ headway, assumed. Worth replacing with the MTA's published headway."""
 
-AIRTRAIN_FARE_USD = (8.75, 9.25)
-SUBWAY_FARE_USD = 2.90
+AIRTRAIN_FARE_USD = 8.75
+Q70_FARE_USD = 0.00
+SUBWAY_FARE_USD = 3.00
+"""Raised from $2.90 in 2026. Fares move; check these before republishing."""
+
+# What a rider actually pays, end to end.
+TRANSIT_FARE_USD = {
+    "JFK": round(SUBWAY_FARE_USD + AIRTRAIN_FARE_USD, 2),
+    "LGA": round(SUBWAY_FARE_USD + Q70_FARE_USD, 2),
+}
 
 LINKS = {
     "JFK": [
@@ -221,6 +229,7 @@ def build(directory: Path, bus_path: Path) -> dict:
 
     return {
         "source": "stringline subway rides plus modelled link legs",
+        "fares": TRANSIT_FARE_USD,
         "corpus": {
             "days": system.get("days_used"),
             "first": system.get("first"),
@@ -239,12 +248,14 @@ def build(directory: Path, bus_path: Path) -> dict:
             "q70_wait_minutes": Q70_WAIT,
             "q70_ride_minutes_by_block": bus_ranges,
             "airtrain_fare_usd": AIRTRAIN_FARE_USD,
+            "q70_fare_usd": Q70_FARE_USD,
             "subway_fare_usd": SUBWAY_FARE_USD,
+            "transit_fare_usd": TRANSIT_FARE_USD,
             "note": (
                 "Modelled, not observed. The Q70+ ride range comes from figures "
                 "already averaged over month, weekday and hour, so it is "
-                "narrower than a rider's experience. Confirm both fares before "
-                "publishing."
+                "narrower than a rider's experience. Fares are confirmed: "
+                "AirTrain $8.75, Q70+ free."
             ),
         },
         "airports": airports,

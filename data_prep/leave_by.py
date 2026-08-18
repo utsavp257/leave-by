@@ -32,6 +32,7 @@ from pathlib import Path
 
 from data_prep import geo, zones as zones_module
 from data_prep.blocks import BLOCK_NAMES
+from data_prep.transit_times import TRANSIT_FARE_USD
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "site" / "data"
@@ -106,12 +107,21 @@ def build(car_path: Path, transit_path: Path) -> dict:
                 transit_p90 = transit_cell["door_p90"] if transit_cell else None
                 blocks[block] = {
                     "car": (
-                        {"p50": car_cell["p50"], "p90": car_p90, "n": car_cell["n"]}
+                        {
+                            "p50": car_cell["p50"],
+                            "p90": car_p90,
+                            "n": car_cell["n"],
+                            "fare": car_cell.get("fare"),
+                        }
                         if car_cell
                         else None
                     ),
                     "transit": (
-                        {"p50": transit_cell["door_p50"], "p90": transit_p90}
+                        {
+                            "p50": transit_cell["door_p50"],
+                            "p90": transit_p90,
+                            "fare": TRANSIT_FARE_USD.get(airport),
+                        }
                         if transit_cell
                         else None
                     ),
@@ -154,6 +164,7 @@ def build(car_path: Path, transit_path: Path) -> dict:
             "transit": transit["corpus"],
         },
         "leave_by_quantile": "p90",
+        "transit_fare_usd": TRANSIT_FARE_USD,
         "meaningful_minutes": MEANINGFUL_MINUTES,
         "blocks": BLOCK_NAMES,
         "evidence": EVIDENCE,

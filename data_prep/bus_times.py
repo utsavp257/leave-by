@@ -74,10 +74,7 @@ LEGS = [
     },
 ]
 
-FARE_NOTE = (
-    "The Q70+ LaGuardia Link has been fare-free at times; confirm the current "
-    "fare and whether the subway transfer is included before publishing."
-)
+FARE_NOTE = "The Q70+ LaGuardia Link is free, so reaching LGA costs one subway swipe."
 
 
 def query(dataset: str, leg: dict) -> list[dict]:

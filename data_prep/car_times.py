@@ -28,7 +28,7 @@ import duckdb
 from data_prep import zones as zones_module
 from data_prep.blocks import BLOCK_NAMES
 from data_prep.histogram import MAX_MINUTES, mean, percentile, total
-from data_prep.tlc import AIRPORTS, CACHE, SOURCES
+from data_prep.tlc import AIRPORTS, CACHE, MAX_FARE, SOURCES
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "site" / "data"
@@ -40,7 +40,11 @@ QUANTILES = (0.5, 0.9, 0.95)
 
 
 def cached_months(source: str) -> list[Path]:
-    return sorted(CACHE.glob(f"{source}_*.parquet"))
+    return sorted(p for p in CACHE.glob(f"{source}_*.parquet") if not p.stem.endswith("_fare"))
+
+
+def cached_fares(source: str) -> list[Path]:
+    return sorted(CACHE.glob(f"{source}_*_fare.parquet"))
 
 
 def load_histograms(paths: list[Path]):
@@ -72,16 +76,47 @@ def load_histograms(paths: list[Path]):
     return per_block, per_day
 
 
-def summarise(counts: list[int]) -> dict:
+def load_fares(paths: list[Path]):
+    """Fare histograms in whole dollars, keyed the same way as the times."""
+    if not paths:
+        return {}, {}
+    con = duckdb.connect()
+    files = ", ".join(f"'{p}'" for p in paths)
+    rows = con.execute(
+        f"""
+        SELECT airport, origin, block, dollars, sum(n) AS n
+        FROM read_parquet([{files}])
+        GROUP BY ALL
+        """
+    ).fetchall()
+
+    size = MAX_FARE + 1
+    per_block: dict[tuple, list[int]] = defaultdict(lambda: [0] * size)
+    per_day: dict[tuple, list[int]] = defaultdict(lambda: [0] * size)
+    for airport, origin, block, dollars, n in rows:
+        n = int(n)
+        per_block[(airport, origin, block)][dollars] += n
+        per_day[(airport, origin)][dollars] += n
+    return per_block, per_day
+
+
+def summarise(counts: list[int], fare_counts: list[int] | None = None) -> dict:
     summary = {"n": total(counts), "mean": round(mean(counts), 1)}
     for q in QUANTILES:
         summary[f"p{int(q * 100)}"] = percentile(counts, q)
+    if fare_counts and total(fare_counts):
+        # The median, not the average. These files carry every service tier, so
+        # an average is pulled up by Black, SUV and surge and prices a journey
+        # no ordinary reader is taking. Tips are excluded upstream.
+        summary["fare"] = percentile(fare_counts, 0.5)
+        summary["fare_p90"] = percentile(fare_counts, 0.9)
     return summary
 
 
 def build(source: str) -> dict:
     paths = cached_months(source)
     per_block, per_day = load_histograms(paths)
+    fare_block, fare_day = load_fares(cached_fares(source))
     zone_names = zones_module.load()
 
     origins = sorted(
@@ -99,13 +134,13 @@ def build(source: str) -> dict:
             if whole_day is None or total(whole_day) < MIN_SAMPLES:
                 continue
 
-            entry = {"day": summarise(whole_day)}
+            entry = {"day": summarise(whole_day, fare_day.get((airport, origin)))}
             for block in BLOCK_NAMES:
                 counts = per_block.get((airport, origin, block))
                 if counts is None or total(counts) < MIN_SAMPLES:
                     thin += 1
                     continue
-                entry[block] = summarise(counts)
+                entry[block] = summarise(counts, fare_block.get((airport, origin, block)))
 
             per_airport[str(origin)] = entry
             reported += 1

@@ -16,6 +16,13 @@ anywhere else it mostly is not:
     fhvhv   Uber and Lyft. HV0003 is Uber, HV0005 is Lyft.
     yellow  Yellow medallion taxis.
 
+Fares get the same treatment as times, in a second file: counts per whole
+dollar rather than a running total. That is deliberate. These files carry every
+service tier, so an average is dragged upwards by Uber Black, SUVs and surge,
+and would price a journey no ordinary reader is taking. A median from a
+histogram is robust to all three, and merges across months the same way the
+travel times do.
+
 A note on trip_time. In the ride-hail files it is seconds, which is easy to
 misread as minutes and would quietly divide every answer by sixty. Rather than
 trust that, `verify_units` checks the column against the gap between the pickup
@@ -33,6 +40,9 @@ import duckdb
 
 from data_prep.blocks import sql_block_expression
 from data_prep.histogram import MAX_MINUTES
+
+MAX_FARE = 300
+"""Dollars. The final bucket means "this much or more"."""
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "data" / "tlc"
@@ -54,6 +64,8 @@ class Source:
     dropoff: str
     # Seconds of travel time. Yellow has no such column and it is derived.
     duration_seconds: str
+    # What the rider is charged, tips excluded - a tip is a choice, not a fare.
+    fare: str
     company: str | None = None
 
     def url(self, year: int, month: int) -> str:
@@ -67,6 +79,11 @@ SOURCES = {
         pickup="pickup_datetime",
         dropoff="dropoff_datetime",
         duration_seconds="trip_time",
+        fare=(
+            "coalesce(base_passenger_fare,0) + coalesce(tolls,0) + coalesce(bcf,0)"
+            " + coalesce(sales_tax,0) + coalesce(congestion_surcharge,0)"
+            " + coalesce(airport_fee,0) + coalesce(cbd_congestion_fee,0)"
+        ),
         company="hvfhs_license_num",
     ),
     "yellow": Source(
@@ -75,6 +92,8 @@ SOURCES = {
         pickup="tpep_pickup_datetime",
         dropoff="tpep_dropoff_datetime",
         duration_seconds="date_diff('second', tpep_pickup_datetime, tpep_dropoff_datetime)",
+        # total_amount includes the tip, so it is taken back out.
+        fare="coalesce(total_amount,0) - coalesce(tip_amount,0)",
     ),
 }
 
@@ -145,8 +164,31 @@ def fetch_month(con, source: Source, year: int, month: int) -> int:
               AND dayofweek({source.pickup}) BETWEEN 1 AND 5
               AND ({source.duration_seconds}) > 0
               AND ({source.duration_seconds}) < 60 * 60 * 6
+              AND ({source.fare}) BETWEEN 0 AND 500
             GROUP BY ALL
         ) TO '{out}' (FORMAT PARQUET)
+        """
+    )
+
+    fares = CACHE / f"{source.name}_{year:04d}-{month:02d}_fare.parquet"
+    con.execute(
+        f"""
+        COPY (
+            SELECT
+                DOLocationID AS airport,
+                PULocationID AS origin,
+                {sql_block_expression(source.pickup)} AS block,
+                least(cast(round({source.fare}) AS INTEGER), {MAX_FARE}) AS dollars,
+                count(*) AS n
+            FROM read_parquet('{url}')
+            WHERE DOLocationID IN ({airport_ids})
+              AND PULocationID IS NOT NULL
+              AND dayofweek({source.pickup}) BETWEEN 1 AND 5
+              AND ({source.duration_seconds}) > 0
+              AND ({source.duration_seconds}) < 60 * 60 * 6
+              AND ({source.fare}) BETWEEN 0 AND 500
+            GROUP BY ALL
+        ) TO '{fares}' (FORMAT PARQUET)
         """
     )
 

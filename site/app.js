@@ -160,7 +160,8 @@ function barRow(mode, label, detail, cell, scale) {
 
   const figure = document.createElement("div");
   figure.className = "bar-figure";
-  figure.textContent = `${cell.p50} min typical · ${cell.p90} min on a bad day`;
+  const money = cell.fare == null ? "" : ` · ${money_(cell.fare)}`;
+  figure.textContent = `${cell.p50} min typical · ${cell.p90} min on a bad day${money}`;
   head.appendChild(figure);
   row.appendChild(head);
 
@@ -188,6 +189,23 @@ function barRow(mode, label, detail, cell, scale) {
   track.append(solid, tail, tick);
   row.appendChild(track);
   return row;
+}
+
+function money_(value) {
+  if (value == null) return "";
+  return value === 0 ? "free" : `$${value.toFixed(2)}`;
+}
+
+/* Say both fares rather than a ratio.
+ *
+ * The ratios here run from about nine times to about thirty-six, because the
+ * Q70 to LaGuardia is free and the trip costs one subway swipe. "A thirty-sixth
+ * of the fare" reads like a typo. Two concrete numbers never do, and they carry
+ * more information anyway. */
+function fareAside(car, transit) {
+  if (!car || !transit || car.fare == null || transit.fare == null) return "";
+  if (car.fare - transit.fare < 5) return "";
+  return ` It also costs ${money_(transit.fare)} against about $${car.fare.toFixed(0)}.`;
 }
 
 function render() {
@@ -225,6 +243,11 @@ function render() {
   el("verdict").innerHTML = verdictLine(zone, cell);
 
   const notes = [];
+  if (car && car.fare != null) {
+    notes.push(
+      "The car fare is the median across every service tier, so it sits above an UberX quote: the same trip in a Black or an SUV is in there too. Tips excluded."
+    );
+  }
   if (transit) {
     notes.push(
       "The train figure is built conservatively, so where it wins it wins by at least this much."
@@ -255,12 +278,12 @@ function verdictLine(zone, cell) {
     return `From ${where}, ${when}, the train is the only measured option: leave <strong>${transit.p90} minutes</strong> ahead.`;
   }
   if (verdict === "too close to call") {
-    return `From ${where}, ${when}, the two are within minutes of each other. Take whichever you prefer and leave <strong>${Math.min(car.p90, transit.p90)} minutes</strong> ahead.`;
+    return `From ${where}, ${when}, the two are within minutes of each other. Leave <strong>${Math.min(car.p90, transit.p90)} minutes</strong> ahead and take whichever you prefer.${fareAside(car, transit)}`;
   }
   if (verdict === "transit") {
-    return `From ${where}, ${when}, the train beats the car on a bad day by <strong>${car.p90 - transit.p90} minutes</strong> — and costs about a tenth as much.`;
+    return `From ${where}, ${when}, the train beats the car on a bad day by <strong>${car.p90 - transit.p90} minutes</strong>.${fareAside(car, transit)}`;
   }
-  return `From ${where}, ${when}, the car wins even at its worst, by <strong>${transit.p90 - car.p90} minutes</strong>.`;
+  return `From ${where}, ${when}, the car wins even at its worst, by <strong>${transit.p90 - car.p90} minutes</strong>.${fareAside(car, transit)}`;
 }
 
 boot();
