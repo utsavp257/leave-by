@@ -1,12 +1,17 @@
-/* Leave-by times, drawn as bars.
+/* Leave-by.
  *
- * The bar is the whole argument, so it is worth saying what it encodes. Solid
- * runs to the median journey. Hatching runs from there to the ninetieth
- * percentile, and that hatched part is the buffer - the time you spend leaving
- * early because the road might betray you. On most trips it is nearly as long
- * as the journey itself, which is the finding.
+ * The map is not a control that happens to be shaped like a city. It is the
+ * chart: every zone is shaded by the answer for that zone, so the shape of the
+ * problem is visible before anything is clicked. Selecting a zone only asks the
+ * map to explain one of the shapes it is already showing.
  *
- * Both modes share one scale so the comparison is honest at a glance.
+ * Bars keep the grammar the map sets up. Solid to the median journey, hatched
+ * from there to the ninetieth percentile. The hatching is the part you cannot
+ * plan around, and on most trips it is nearly as long as the trip.
+ *
+ * No framework, no build. The motion patterns here are the familiar ones -
+ * staggered entrance, reveal on scroll, counting numbers, spring easing - written
+ * directly against the platform because the page has no bundler to feed.
  */
 
 const BLOCK_LABELS = {
@@ -17,31 +22,46 @@ const BLOCK_LABELS = {
   evening: "After 7pm",
 };
 
-/* Car fares are withheld until the double-count question is settled.
- *
- * A real UberX quote from Herald Square to JFK at 7pm was $80. In those zones,
- * in that block, the built figures put about one trip in a hundred at or below
- * $80. That gap is too wide for a scheduled-versus-live discount, and a median
- * near $152 is close to twice $76, which is what a double count looks like.
- *
- * Run `python -m data_prep.check_fare` to settle it. If the components turn out
- * not to be double counted, set this to true and the fares appear everywhere
- * they were written to. Travel times are unaffected either way - the fare is an
- * aside, and the argument of the page does not rest on it. */
-const SHOW_FARES = false;
+const SHADE_MODES = {
+  leave: { label: "Leave-by", low: "quicker", high: "longer" },
+  buffer: { label: "Unpredictability", low: "steady", high: "wild" },
+};
 
-const state = { data: null, airport: "JFK", origin: null, block: "pm" };
+const RAMP = ["--s1", "--s2", "--s3", "--s4", "--s5"];
+
+const state = {
+  data: null,
+  map: null,
+  airport: "JFK",
+  block: "pm",
+  shade: "leave",
+  origin: null,
+  pin: null,
+};
 
 const el = (id) => document.getElementById(id);
+const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ── boot ─────────────────────────────────────────────────── */
 
 async function boot() {
-  const response = await fetch("data/leaveby.json");
-  state.data = await response.json();
+  const [data, map] = await Promise.all([
+    fetch("data/leaveby.json").then((r) => r.json()),
+    fetch("data/map.json").then((r) => r.json()),
+  ]);
+  state.data = data;
+  state.map = map;
 
-  buildAirports();
-  buildBlocks();
-  buildOrigins();
-  render();
+  buildSegmented("airport", airportsAvailable(), (a) => a, "airport");
+  buildSegmented("block", data.blocks, (b) => BLOCK_LABELS[b] || b, "block");
+  buildSegmented("shade", Object.keys(SHADE_MODES), (s) => SHADE_MODES[s].label, "shade");
+
+  drawMap();
+  pickDefault();
+  paintMap();
+  renderAnswer();
+  wireSearch();
+  revealOnScroll();
 }
 
 function airportsAvailable() {
@@ -50,91 +70,165 @@ function airportsAvailable() {
   );
 }
 
-function buildAirports() {
-  const host = el("airport");
+function buildSegmented(id, values, label, key) {
+  const host = el(id);
   host.innerHTML = "";
-  for (const airport of airportsAvailable()) {
+  for (const value of values) {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = airport;
-    button.setAttribute("aria-pressed", String(airport === state.airport));
+    button.textContent = label(value);
+    button.setAttribute("aria-pressed", String(state[key] === value));
     button.addEventListener("click", () => {
-      state.airport = airport;
-      buildAirports();
-      buildOrigins();
-      render();
+      if (state[key] === value) return;
+      state[key] = value;
+      [...host.children].forEach((b) =>
+        b.setAttribute("aria-pressed", String(b === button))
+      );
+      if (key === "airport") {
+        pickDefault();
+        fillSearchOptions();
+      }
+      paintMap();
+      renderAnswer();
     });
     host.appendChild(button);
   }
 }
 
-function buildBlocks() {
-  const host = el("block");
-  host.innerHTML = "";
-  for (const block of state.data.blocks) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = BLOCK_LABELS[block] || block;
-    button.setAttribute("aria-pressed", String(block === state.block));
-    button.addEventListener("click", () => {
-      state.block = block;
-      buildBlocks();
-      render();
-    });
-    host.appendChild(button);
+/* ── the map ──────────────────────────────────────────────── */
+
+const AIRPORT_ZONES = { JFK: "132", LGA: "138", EWR: "1" };
+
+function drawMap() {
+  const svg = el("map");
+  svg.setAttribute("viewBox", state.map.viewbox.join(" "));
+  const frag = document.createDocumentFragment();
+
+  for (const [id, shape] of Object.entries(state.map.zones)) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", shape.d);
+    path.setAttribute("class", "zone");
+    path.dataset.zone = id;
+    path.dataset.name = shape.name;
+    frag.appendChild(path);
   }
+  svg.appendChild(frag);
+
+  state.pin = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  state.pin.setAttribute("class", "pin");
+  state.pin.innerHTML =
+    '<circle class="pin-halo" r="16"></circle>' +
+    '<circle class="pin-ring" r="7"></circle>' +
+    '<circle class="pin-core" r="2.6"></circle>';
+  svg.appendChild(state.pin);
+
+  svg.addEventListener("pointermove", onHover);
+  svg.addEventListener("pointerleave", hideTip);
+  svg.addEventListener("click", (event) => {
+    const path = event.target.closest(".zone-live");
+    if (!path) return;
+    state.origin = path.dataset.zone;
+    el("search").value = path.dataset.name;
+    paintMap();
+    renderAnswer();
+  });
 }
 
-function buildOrigins() {
-  const zones = state.data.airports[state.airport];
-  const select = el("origin");
-  const previous = state.origin;
-  select.innerHTML = "";
+function zonesForAirport() {
+  return state.data.airports[state.airport] || {};
+}
 
-  const byBorough = new Map();
-  for (const [id, zone] of Object.entries(zones)) {
-    if (!byBorough.has(zone.borough)) byBorough.set(zone.borough, []);
-    byBorough.get(zone.borough).push([id, zone]);
+function valueFor(zone) {
+  const cell = zone && zone.blocks[state.block];
+  if (!cell || !cell.car) return null;
+  return state.shade === "buffer" ? cell.car.p90 - cell.car.p50 : cell.car.p90;
+}
+
+function paintMap() {
+  const zones = zonesForAirport();
+  const values = [];
+  for (const zone of Object.values(zones)) {
+    const v = valueFor(zone);
+    if (v != null) values.push(v);
   }
+  if (!values.length) return;
 
-  // Places with a train option first, since that is the comparison the page is
-  // actually about; everything else still available underneath.
-  for (const borough of [...byBorough.keys()].sort()) {
-    const group = document.createElement("optgroup");
-    group.label = borough;
-    const entries = byBorough.get(borough).sort((a, b) => {
-      const viaDiff = Number(Boolean(b[1].via)) - Number(Boolean(a[1].via));
-      return viaDiff || a[1].zone.localeCompare(b[1].zone);
-    });
-    for (const [id, zone] of entries) {
-      const option = document.createElement("option");
-      option.value = id;
-      option.textContent = zone.via ? zone.zone : `${zone.zone} — car only`;
-      group.appendChild(option);
+  // Quantile breaks rather than equal steps. Travel times bunch heavily around
+  // the middle, and even slicing would leave four of five colours unused.
+  values.sort((a, b) => a - b);
+  const breaks = [0.2, 0.4, 0.6, 0.8].map(
+    (q) => values[Math.floor(q * (values.length - 1))]
+  );
+
+  const styles = getComputedStyle(document.documentElement);
+  const ramp = RAMP.map((name) => styles.getPropertyValue(name).trim());
+  const airportZone = AIRPORT_ZONES[state.airport];
+
+  for (const path of el("map").querySelectorAll(".zone")) {
+    const id = path.dataset.zone;
+    path.classList.remove("zone-live", "zone-dead", "zone-airport", "zone-selected");
+
+    if (id === airportZone) {
+      path.classList.add("zone-airport");
+      path.style.fill = "";
+      continue;
     }
-    select.appendChild(group);
+    const value = valueFor(zones[id]);
+    if (value == null) {
+      path.classList.add("zone-dead");
+      path.style.fill = "";
+      continue;
+    }
+    let step = 0;
+    while (step < breaks.length && value > breaks[step]) step++;
+    path.style.fill = ramp[step];
+    path.classList.add("zone-live");
+    if (id === state.origin) path.classList.add("zone-selected");
   }
 
-  if (previous && zones[previous]) {
-    select.value = previous;
+  const shape = state.map.zones[state.origin];
+  if (shape && shape.c) {
+    state.pin.setAttribute("transform", `translate(${shape.c[0]} ${shape.c[1]})`);
+    state.pin.classList.add("on");
   } else {
-    select.value = mostInstructive(zones);
+    state.pin.classList.remove("on");
   }
-  state.origin = select.value;
-  select.onchange = () => {
-    state.origin = select.value;
-    render();
-  };
+
+  const mode = SHADE_MODES[state.shade];
+  el("legend-low").textContent = `${mode.low} · ${values[0]} min`;
+  el("legend-high").textContent = `${values[values.length - 1]} min · ${mode.high}`;
 }
 
-/* Open on a place where the two modes actually disagree.
- *
- * Landing on a zone where the car and the train are within a few minutes makes
- * the page look like it has nothing to say. The widest honest gap is the
- * clearest demonstration of what the bars are for, and the reader can pick
- * their own street immediately afterwards.
- */
-function mostInstructive(zones) {
+function onHover(event) {
+  const path = event.target.closest(".zone-live, .zone-airport");
+  const tip = el("tip");
+  if (!path) return hideTip();
+
+  const zone = zonesForAirport()[path.dataset.zone];
+  const value = valueFor(zone);
+  const shell = el("map").getBoundingClientRect();
+  const box = path.getBoundingClientRect();
+
+  tip.innerHTML = value == null
+    ? `<b>${path.dataset.name}</b>`
+    : `<b>${zone.zone}</b><span>${value} min ${state.shade === "buffer" ? "of slack" : "before your flight"}</span>`;
+  tip.style.left = `${box.left + box.width / 2 - shell.left}px`;
+  tip.style.top = `${box.top - shell.top}px`;
+  tip.classList.add("on");
+}
+
+function hideTip() {
+  el("tip").classList.remove("on");
+}
+
+/* ── choosing a default ───────────────────────────────────── */
+
+function pickDefault() {
+  const zones = zonesForAirport();
+  if (state.origin && zones[state.origin]) return;
+
+  // Open on the widest honest disagreement between the two modes: a page that
+  // lands on a tie looks like it has nothing to say.
   let best = null;
   let bestGap = -Infinity;
   for (const [id, zone] of Object.entries(zones)) {
@@ -146,9 +240,120 @@ function mostInstructive(zones) {
       best = id;
     }
   }
-  if (best) return best;
-  const withTrain = Object.entries(zones).find(([, z]) => z.via);
-  return withTrain ? withTrain[0] : Object.keys(zones)[0];
+  state.origin = best || Object.keys(zones)[0] || null;
+  const zone = zones[state.origin];
+  if (zone) el("search").value = zone.zone;
+}
+
+function wireSearch() {
+  fillSearchOptions();
+  const input = el("search");
+  input.addEventListener("change", () => {
+    const zones = zonesForAirport();
+    const match = Object.entries(zones).find(
+      ([, z]) => z.zone.toLowerCase() === input.value.trim().toLowerCase()
+    );
+    if (!match) return;
+    state.origin = match[0];
+    paintMap();
+    renderAnswer();
+  });
+}
+
+function fillSearchOptions() {
+  const list = el("zone-list");
+  list.innerHTML = "";
+  const zones = zonesForAirport();
+  const names = Object.values(zones)
+    .map((z) => z.zone)
+    .sort((a, b) => a.localeCompare(b));
+  for (const name of names) {
+    const option = document.createElement("option");
+    option.value = name;
+    list.appendChild(option);
+  }
+}
+
+/* ── the answer ───────────────────────────────────────────── */
+
+function renderAnswer() {
+  const host = el("answer");
+  const zone = zonesForAirport()[state.origin];
+  host.innerHTML = "";
+
+  if (!zone) {
+    host.innerHTML = `<p class="verdict">Pick a neighbourhood on the map to see when to leave.</p>`;
+    return;
+  }
+
+  const cell = zone.blocks[state.block];
+  const place = document.createElement("div");
+  place.className = "answer-place";
+  place.textContent = `${zone.zone} · ${zone.borough} → ${state.airport}`;
+  host.appendChild(place);
+
+  if (!cell) {
+    const none = document.createElement("p");
+    none.className = "verdict";
+    none.textContent = `Too few recorded trips from ${zone.zone} at this time of day to say anything honest.`;
+    host.appendChild(none);
+    return;
+  }
+
+  const { car, transit } = cell;
+  const leaveBy = cell.leave_by;
+
+  const headline = document.createElement("div");
+  headline.className = "leave-by";
+  const value = document.createElement("span");
+  value.className = "leave-by-value";
+  value.textContent = "0";
+  const unit = document.createElement("span");
+  unit.className = "leave-by-unit";
+  unit.textContent = `minutes ahead, leaving ${(BLOCK_LABELS[state.block] || "").toLowerCase()}`;
+  headline.append(value, unit);
+  host.appendChild(headline);
+  countTo(value, leaveBy);
+
+  const verdict = document.createElement("p");
+  verdict.className = "verdict";
+  verdict.innerHTML = verdictLine(zone, cell);
+  host.appendChild(verdict);
+
+  const longest = Math.max(car ? car.p90 : 0, transit ? transit.p90 : 0, 30);
+  const scale = Math.ceil(longest / 30) * 30;
+
+  const bars = document.createElement("div");
+  bars.className = "bars";
+  bars.appendChild(barRow("car", "Car", "Uber, Lyft or a cab", car, scale));
+  bars.appendChild(
+    barRow(
+      "transit",
+      "Train",
+      zone.via ? `${zone.via.route} from ${zone.via.station}, then the ${zone.via.link}` : "",
+      transit,
+      scale
+    )
+  );
+  bars.appendChild(axisRow(scale));
+  host.appendChild(bars);
+
+  const notes = [];
+  if (transit) {
+    notes.push("The train figure is built conservatively, so where it wins it wins by at least this much.");
+  }
+  if (state.airport === "LGA" && transit) {
+    notes.push(`<span class="flag">Weaker evidence</span>The bus leg is published already averaged over a month, a weekday and an hour, which hides the worst buses.`);
+  }
+  if (state.airport === "EWR") {
+    notes.push(`<span class="flag">Car only</span>New Jersey Transit publishes punctuality percentages rather than journey times, so there is no honest train bar to draw.`);
+  }
+  if (notes.length) {
+    const evidence = document.createElement("div");
+    evidence.className = "evidence";
+    evidence.innerHTML = notes.map((n) => `<p>${n}</p>`).join("");
+    host.appendChild(evidence);
+  }
 }
 
 function barRow(mode, label, detail, cell, scale) {
@@ -157,10 +362,8 @@ function barRow(mode, label, detail, cell, scale) {
 
   const head = document.createElement("div");
   head.className = "bar-head";
-  const name = document.createElement("div");
-  name.className = "bar-mode";
-  name.innerHTML = `${label} <span>${detail}</span>`;
-  head.appendChild(name);
+  head.innerHTML =
+    `<div class="bar-mode"><span class="bar-dot"></span>${label} <span>${detail}</span></div>`;
 
   if (!cell) {
     row.appendChild(head);
@@ -173,56 +376,28 @@ function barRow(mode, label, detail, cell, scale) {
 
   const figure = document.createElement("div");
   figure.className = "bar-figure";
-  const money = !SHOW_FARES || cell.fare == null ? "" : ` · ${money_(cell.fare)}`;
-  figure.textContent = `${cell.p50} min typical · ${cell.p90} min on a bad day${money}`;
+  figure.textContent = `${cell.p50} typical · ${cell.p90} on a bad day`;
   head.appendChild(figure);
   row.appendChild(head);
 
   const track = document.createElement("div");
   track.className = "track";
-
   const solid = document.createElement("div");
   solid.className = "solid";
-  solid.style.width = `${(cell.p50 / scale) * 100}%`;
-
   const tail = document.createElement("div");
   tail.className = "tail";
-  tail.style.left = `${(cell.p50 / scale) * 100}%`;
-  tail.style.width = `${((cell.p90 - cell.p50) / scale) * 100}%`;
-
-  // Anchored from the right so the label grows leftwards from the tail's end.
-  // Positioning it from the left and pulling it back with a transform leaves a
-  // layout box hanging off the right edge, which widens the whole page on a
-  // phone even though the text looks fine.
-  const tick = document.createElement("div");
-  tick.className = "tick";
-  tick.style.right = `${100 - (cell.p90 / scale) * 100}%`;
-  tick.textContent = `leave ${cell.p90} min ahead`;
-
-  track.append(solid, tail, tick);
+  track.append(solid, tail);
   row.appendChild(track);
+
+  // Widths are set after paint so the transition has a zero state to run from.
+  requestAnimationFrame(() => {
+    solid.style.width = `${(cell.p50 / scale) * 100}%`;
+    tail.style.left = `${(cell.p50 / scale) * 100}%`;
+    tail.style.width = `${((cell.p90 - cell.p50) / scale) * 100}%`;
+  });
   return row;
 }
 
-/* The distance between the two bad-day marks. It is the finding, so it gets
- * drawn rather than left to the sentence above the chart. */
-function gapRow(car, transit, scale) {
-  const row = document.createElement("div");
-  row.className = "gap-row";
-  const low = Math.min(car.p90, transit.p90);
-  const high = Math.max(car.p90, transit.p90);
-
-  const span = document.createElement("div");
-  span.className = "gap-span";
-  span.style.left = `${(low / scale) * 100}%`;
-  span.style.width = `${((high - low) / scale) * 100}%`;
-  span.innerHTML = `<span class="gap-label">${high - low} min</span>`;
-  row.appendChild(span);
-  return row;
-}
-
-/* One axis under both bars, so the two lengths are comparable by eye and not
- * only by reading the figures. */
 function axisRow(scale) {
   const row = document.createElement("div");
   row.className = "axis";
@@ -230,8 +405,6 @@ function axisRow(scale) {
     const tick = document.createElement("span");
     tick.className = "axis-tick";
     tick.style.left = `${(minutes / scale) * 100}%`;
-    // The unit rides on the last tick. A separate label at the right edge
-    // collides with it, and both were competing for the same few pixels.
     tick.textContent = minutes === scale ? `${minutes} min` : `${minutes}`;
     if (minutes === 0) tick.classList.add("axis-first");
     if (minutes === scale) tick.classList.add("axis-last");
@@ -240,108 +413,81 @@ function axisRow(scale) {
   return row;
 }
 
-function money_(value) {
-  if (value == null) return "";
-  return value === 0 ? "free" : `$${value.toFixed(2)}`;
+function verdictLine(zone, cell) {
+  const { car, transit, verdict } = cell;
+  const where = zone.zone;
+
+  if (!transit) {
+    return `No measured train option from ${where}. The car is the only way this page can price.`;
+  }
+  if (!car) {
+    return `Only the train is measured from ${where} at this hour.`;
+  }
+  if (verdict === "too close to call") {
+    return `Car and train are within minutes of each other. Take whichever you prefer.`;
+  }
+  if (verdict === "transit") {
+    return `The train beats the car on a bad day by <strong>${car.p90 - transit.p90} minutes</strong>.`;
+  }
+  return `The car wins even at its worst, by <strong>${transit.p90 - car.p90} minutes</strong>.`;
 }
 
-/* Say both fares rather than a ratio.
- *
- * The ratios here run from about nine times to about thirty-six, because the
- * Q70 to LaGuardia is free and the trip costs one subway swipe. "A thirty-sixth
- * of the fare" reads like a typo. Two concrete numbers never do, and they carry
- * more information anyway. */
-function fareAside(car, transit) {
-  if (!SHOW_FARES) return "";
-  if (!car || !transit || car.fare == null || transit.fare == null) return "";
-  if (car.fare - transit.fare < 5) return "";
-  return ` It also costs ${money_(transit.fare)} against about $${car.fare.toFixed(0)}.`;
+/* ── motion ───────────────────────────────────────────────── */
+
+function countTo(node, target) {
+  if (reduced) {
+    node.textContent = target;
+    return;
+  }
+  const duration = 650;
+  const start = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / duration);
+    // Same easing as the CSS spring, so numbers and bars settle together.
+    const eased = 1 - Math.pow(1 - t, 3);
+    node.textContent = Math.round(target * eased);
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
-function render() {
-  const zone = state.data.airports[state.airport][state.origin];
-  const bars = el("bars");
-  const evidence = el("evidence");
-  bars.innerHTML = "";
-  evidence.innerHTML = "";
-
-  if (!zone) return;
-  const cell = zone.blocks[state.block];
-
-  if (!cell) {
-    el("verdict").textContent =
-      `Too few recorded trips from ${zone.zone} at this time of day to say anything honest.`;
+function revealOnScroll() {
+  const items = [...document.querySelectorAll(".rise")];
+  if (reduced || !("IntersectionObserver" in window)) {
+    items.forEach((n) => n.classList.add("in"));
     return;
   }
 
-  const car = cell.car;
-  const transit = cell.transit;
-  // Round the axis up to a whole half hour. An arbitrary margin leaves the
-  // bars stopping in blank space, which reads as a broken chart; a round
-  // maximum makes the leftover part of the track mean something.
-  const longest = Math.max(car ? car.p90 : 0, transit ? transit.p90 : 0, 30);
-  const scale = Math.ceil(longest / 30) * 30;
+  // The masthead is above the fold and should not wait for a scroll event.
+  const above = items.filter((n) => n.getBoundingClientRect().top < window.innerHeight);
+  above.forEach((n, i) => setTimeout(() => n.classList.add("in"), 80 * i));
 
-  const via = zone.via;
-  bars.appendChild(barRow("car", "Car", "Uber, Lyft or a cab", car, scale));
-  bars.appendChild(
-    barRow(
-      "transit",
-      "Train",
-      via ? `${via.route} from ${via.station}, then the ${via.link}` : "",
-      transit,
-      scale
-    )
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        entry.target.classList.add("in");
+        if (entry.target.id === "then-now") animateThenNow(entry.target);
+        observer.unobserve(entry.target);
+      }
+    },
+    { rootMargin: "0px 0px -12% 0px" }
   );
-  if (car && transit && Math.abs(car.p90 - transit.p90) >= state.data.meaningful_minutes) {
-    bars.appendChild(gapRow(car, transit, scale));
-  }
-  bars.appendChild(axisRow(scale));
+  items.filter((n) => !above.includes(n)).forEach((n) => observer.observe(n));
 
-  el("verdict").innerHTML = verdictLine(zone, cell);
-
-  const notes = [];
-  if (SHOW_FARES && car && car.fare != null) {
-    notes.push(
-      "The car fare is the median across every service tier, so it sits above an UberX quote: the same trip in a Black or an SUV is in there too. Tips excluded."
-    );
-  }
-  if (transit) {
-    notes.push(
-      "The train figure is built conservatively, so where it wins it wins by at least this much."
-    );
-  }
-  if (state.airport === "LGA" && transit) {
-    notes.push(
-      `<span class="flag">Weaker evidence</span> The bus leg is published already averaged over a month, a weekday and an hour, which hides the worst buses. Treat the train bar here as optimistic.`
-    );
-  }
-  if (state.airport === "EWR") {
-    notes.push(
-      `<span class="flag">Car only</span> New Jersey Transit publishes punctuality percentages rather than journey times, so there is no honest train bar to draw.`
-    );
-  }
-  evidence.innerHTML = notes.map((n) => `<p>${n}</p>`).join("");
+  const thenNow = el("then-now");
+  if (above.includes(thenNow)) animateThenNow(thenNow);
 }
 
-function verdictLine(zone, cell) {
-  const { car, transit, verdict } = cell;
-  const when = (BLOCK_LABELS[state.block] || state.block).toLowerCase();
-  const where = zone.zone;
-
-  if (verdict === "car only" || !transit) {
-    return `From ${where}, ${when}, leave <strong>${car.p90} minutes</strong> before you have to be at ${state.airport}.`;
-  }
-  if (verdict === "transit only") {
-    return `From ${where}, ${when}, the train is the only measured option: leave <strong>${transit.p90} minutes</strong> ahead.`;
-  }
-  if (verdict === "too close to call") {
-    return `From ${where}, ${when}, the two are within minutes of each other. Leave <strong>${Math.min(car.p90, transit.p90)} minutes</strong> ahead and take whichever you prefer.${fareAside(car, transit)}`;
-  }
-  if (verdict === "transit") {
-    return `From ${where}, ${when}, the train beats the car on a bad day by <strong>${car.p90 - transit.p90} minutes</strong>.${fareAside(car, transit)}`;
-  }
-  return `From ${where}, ${when}, the car wins even at its worst, by <strong>${transit.p90 - car.p90} minutes</strong>.${fareAside(car, transit)}`;
+function animateThenNow(root) {
+  root.querySelectorAll(".tn-fill").forEach((fill, i) => {
+    setTimeout(() => {
+      fill.style.width = `${fill.dataset.width}%`;
+    }, reduced ? 0 : 120 * i);
+  });
+  root.querySelectorAll("[data-count]").forEach((node, i) => {
+    setTimeout(() => countTo(node, Number(node.dataset.count)), reduced ? 0 : 120 * i);
+  });
 }
 
 boot();
