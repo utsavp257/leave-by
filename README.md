@@ -21,17 +21,19 @@ whole day. So every figure here is a distribution, and the headline is its tail.
 
 That has a consequence worth stating: the mode that is quicker on a normal
 afternoon is not always the mode that gets you there. From Midtown at rush hour
-the train beats a car by roughly half an hour at the ninetieth percentile, and
-costs $11.75 against a median car fare near $150 at that hour. From most of
-the outer boroughs, the car wins even at its worst.
+the train beats a car by roughly half an hour at the ninetieth percentile. From
+most of the outer boroughs, the car wins even at its worst.
 
-Fares, confirmed for 2026: the subway is $3.00, the AirTrain $8.75, and the Q70+
-LaGuardia Link is free — so reaching LaGuardia by transit costs a single swipe.
-Car fares are measured per neighbourhood from the trip records as medians in
-whole dollars, tips excluded. They read high against a remembered UberX price
-because the trip files carry every service tier — Black and SUV are in the same
-distribution. Worth one real-world spot check against a live quote before
-publishing.
+Transit fares, confirmed for 2026: the subway is $3.00, the AirTrain $8.75, and
+the Q70+ LaGuardia Link is free — so reaching LaGuardia by transit costs a
+single swipe.
+
+**Car fares are computed but not shown.** A real UberX quote from Herald Square
+to JFK came to $80, while the built figures put roughly 1% of trips in those
+zones at or below that. The gap is too wide to be a scheduled-versus-live
+discount and looks like a double count in the fare expression, so the numbers
+are withheld until `data_prep/check_fare.py` settles it. Travel times are
+unaffected.
 
 ## The data
 

@@ -17,6 +17,19 @@ const BLOCK_LABELS = {
   evening: "After 7pm",
 };
 
+/* Car fares are withheld until the double-count question is settled.
+ *
+ * A real UberX quote from Herald Square to JFK at 7pm was $80. In those zones,
+ * in that block, the built figures put about one trip in a hundred at or below
+ * $80. That gap is too wide for a scheduled-versus-live discount, and a median
+ * near $152 is close to twice $76, which is what a double count looks like.
+ *
+ * Run `python -m data_prep.check_fare` to settle it. If the components turn out
+ * not to be double counted, set this to true and the fares appear everywhere
+ * they were written to. Travel times are unaffected either way - the fare is an
+ * aside, and the argument of the page does not rest on it. */
+const SHOW_FARES = false;
+
 const state = { data: null, airport: "JFK", origin: null, block: "pm" };
 
 const el = (id) => document.getElementById(id);
@@ -160,7 +173,7 @@ function barRow(mode, label, detail, cell, scale) {
 
   const figure = document.createElement("div");
   figure.className = "bar-figure";
-  const money = cell.fare == null ? "" : ` · ${money_(cell.fare)}`;
+  const money = !SHOW_FARES || cell.fare == null ? "" : ` · ${money_(cell.fare)}`;
   figure.textContent = `${cell.p50} min typical · ${cell.p90} min on a bad day${money}`;
   head.appendChild(figure);
   row.appendChild(head);
@@ -203,6 +216,7 @@ function money_(value) {
  * of the fare" reads like a typo. Two concrete numbers never do, and they carry
  * more information anyway. */
 function fareAside(car, transit) {
+  if (!SHOW_FARES) return "";
   if (!car || !transit || car.fare == null || transit.fare == null) return "";
   if (car.fare - transit.fare < 5) return "";
   return ` It also costs ${money_(transit.fare)} against about $${car.fare.toFixed(0)}.`;
@@ -243,7 +257,7 @@ function render() {
   el("verdict").innerHTML = verdictLine(zone, cell);
 
   const notes = [];
-  if (car && car.fare != null) {
+  if (SHOW_FARES && car && car.fare != null) {
     notes.push(
       "The car fare is the median across every service tier, so it sits above an UberX quote: the same trip in a Black or an SUV is in there too. Tips excluded."
     );
