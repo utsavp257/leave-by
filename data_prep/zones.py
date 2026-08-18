@@ -18,6 +18,7 @@ from pathlib import Path
 import requests
 
 ROOT = Path(__file__).resolve().parent.parent
+REFERENCE = ROOT / "reference" / "taxi_zone_lookup.csv"
 CACHE = ROOT / "data" / "taxi_zone_lookup.csv"
 URL = "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv"
 
@@ -25,6 +26,10 @@ AIRPORT_ZONES = {132: "JFK", 138: "LGA", 1: "EWR"}
 
 
 def download(force: bool = False) -> Path:
+    # Twelve kilobytes that change when the city redraws its zones. Committed,
+    # so a build never depends on the CDN being in a good mood.
+    if REFERENCE.exists() and not force:
+        return REFERENCE
     if CACHE.exists() and not force:
         return CACHE
     CACHE.parent.mkdir(parents=True, exist_ok=True)

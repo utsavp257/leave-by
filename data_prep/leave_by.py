@@ -67,7 +67,7 @@ def verdict(car_p90: int | None, transit_p90: int | None) -> str:
 def build(car_path: Path, transit_path: Path) -> dict:
     car = json.loads(car_path.read_text())
     transit = json.loads(transit_path.read_text())
-    grouped = geo.stations_by_zone()
+    grouped = geo.load_mapping()
     zone_names = zones_module.load()
 
     results: dict[str, dict] = {}
@@ -81,11 +81,7 @@ def build(car_path: Path, transit_path: Path) -> dict:
 
         for origin, cells in car_cells.items():
             stations = grouped.get(int(origin), [])
-            options = {
-                station["name"]: available[station["name"]]
-                for station in stations
-                if station["name"] in available
-            }
+            options = {name: available[name] for name in stations if name in available}
             best = None
             if options:
                 best_name = min(

@@ -18,25 +18,38 @@ stop `H03`. Dropping the last character gives the key.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import requests
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "data"
+REFERENCE = ROOT / "reference"
 
 ZONES_URL = "https://data.cityofnewyork.us/resource/8meu-9t5y.json?$limit=500"
 STATIONS_URL = "https://data.ny.gov/resource/39hk-dx4f.json?$limit=2000"
 
 
-def _cached(name: str, url: str) -> list[dict]:
+def _cached(name: str, url: str, attempts: int = 4) -> list[dict]:
+    """Fetch once and keep it. Retries, because the CDN throttles after a run of
+    heavy reads and will refuse even a small file."""
     path = CACHE / name
-    if not path.exists():
-        CACHE.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        return json.loads(path.read_text())
+
+    CACHE.mkdir(parents=True, exist_ok=True)
+    for attempt in range(1, attempts + 1):
         response = requests.get(url, timeout=120)
-        response.raise_for_status()
-        path.write_bytes(response.content)
-    return json.loads(path.read_text())
+        if response.ok:
+            path.write_bytes(response.content)
+            return json.loads(path.read_text())
+        if attempt == attempts:
+            response.raise_for_status()
+        pause = 20 * attempt
+        print(f"{name}: HTTP {response.status_code}, retrying in {pause}s")
+        time.sleep(pause)
+    raise RuntimeError(f"{name}: unreachable")
 
 
 def point_in_ring(x: float, y: float, ring: list) -> bool:
@@ -164,7 +177,36 @@ def stations_by_zone() -> dict[int, list[dict]]:
     return grouped
 
 
+MAPPING = REFERENCE / "stations_by_zone.json"
+
+
+def load_mapping() -> dict[int, list[str]]:
+    """The committed station-to-zone mapping.
+
+    The join itself needs four megabytes of zone geometry and a station list,
+    and produces eight kilobytes. Downloading both on every build made the
+    pipeline depend on a CDN that throttles, to recompute an answer that changes
+    when the subway does - which is to say almost never. So the answer is
+    committed and this reads it.
+
+    Regenerate with `python -m data_prep.geo` when a station opens.
+    """
+    if not MAPPING.exists():
+        raise FileNotFoundError(
+            f"{MAPPING} missing - regenerate with `python -m data_prep.geo`"
+        )
+    return {int(k): v for k, v in json.loads(MAPPING.read_text()).items()}
+
+
 if __name__ == "__main__":
     grouped = stations_by_zone()
     total = sum(len(v) for v in grouped.values())
+    REFERENCE.mkdir(parents=True, exist_ok=True)
+    MAPPING.write_text(
+        json.dumps(
+            {str(k): [s["name"] for s in v] for k, v in sorted(grouped.items())},
+            separators=(",", ":"),
+        )
+    )
     print(f"{total} stations placed across {len(grouped)} taxi zones")
+    print(f"wrote {MAPPING} ({MAPPING.stat().st_size / 1024:.0f} KB)")
