@@ -116,8 +116,11 @@ h1 {
   line-height: 0.94; letter-spacing: -0.04em; font-weight: 700;
 }
 h1 em {
+  /* Saturated rather than bright. The earlier gradient ran up to a pale
+     #ffd08a, which next to white type read as washed out rather than accented.
+     This stays deep across its whole width. */
   font-style: normal;
-  background: linear-gradient(96deg, var(--car), #ffd08a);
+  background: linear-gradient(96deg, #ff7a12, #ff9f33);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 
@@ -257,6 +260,16 @@ h1 em {
 .segmented button:hover:not([aria-pressed="true"]) { color: var(--ink); }
 .segmented-wide { display: flex; width: 100%; }
 .segmented-wide button { flex: 1 1 auto; padding-inline: 0.5rem; }
+
+@media (max-width: 560px) {
+  /* Five ranges across a phone. Any larger and they wrap to two lines each,
+     which turns a row of buttons into a paragraph. */
+  .segmented-wide button {
+    font-size: 0.6rem; padding-inline: 0.3rem; letter-spacing: 0.02em;
+  }
+  .segmented button { padding-block: 0.5rem; }
+  .map-card { padding: 0.5rem; }
+}
 
 /* ── the answer ───────────────────────────────────────────── */
 

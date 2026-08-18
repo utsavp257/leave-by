@@ -125,13 +125,47 @@ function drawMap() {
   svg.addEventListener("pointermove", onHover);
   svg.addEventListener("pointerleave", hideTip);
   svg.addEventListener("click", (event) => {
-    const path = event.target.closest(".zone-live");
-    if (!path) return;
-    state.origin = path.dataset.zone;
-    el("search").value = path.dataset.name;
-    paintMap();
-    renderAnswer();
+    const direct = event.target.closest(".zone-live");
+    const id = direct ? direct.dataset.zone : nearestZone(event);
+    if (!id) return;
+    select(id);
   });
+}
+
+/* Midtown is about four pixels wide on a phone, so requiring a direct hit makes
+ * the map decorative. A tap that lands near a zone picks that zone; a tap out in
+ * the harbour still does nothing. */
+function nearestZone(event) {
+  const svg = el("map");
+  const rect = svg.getBoundingClientRect();
+  const [vx, vy, vw, vh] = state.map.viewbox;
+  const x = vx + ((event.clientX - rect.left) / rect.width) * vw;
+  const y = vy + ((event.clientY - rect.top) / rect.height) * vh;
+
+  const zones = zonesForAirport();
+  let best = null;
+  let bestDistance = Infinity;
+  for (const [id, shape] of Object.entries(state.map.zones)) {
+    if (!shape.c || !zones[id] || valueFor(zones[id]) == null) continue;
+    const d = Math.hypot(shape.c[0] - x, shape.c[1] - y);
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = id;
+    }
+  }
+  // The forgiveness radius is defined in screen pixels and converted, so it is
+  // the same physical distance on a phone as on a monitor. A fixed value in map
+  // units would be generous on a wide screen and useless on a narrow one.
+  const unitsPerPixel = vw / rect.width;
+  return bestDistance <= 22 * unitsPerPixel ? best : null;
+}
+
+function select(id) {
+  state.origin = id;
+  const shape = state.map.zones[id];
+  if (shape) el("search").value = shape.name;
+  paintMap();
+  renderAnswer();
 }
 
 function zonesForAirport() {
@@ -439,16 +473,35 @@ function countTo(node, target) {
     node.textContent = target;
     return;
   }
+
   const duration = 650;
   const start = performance.now();
+  let settled = false;
+
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    node.textContent = target;
+  };
+
   const step = (now) => {
+    // The guard below can land first if the clock and the timers ever disagree.
+    // Without this check the loop would carry on and paint a half-counted
+    // number back over the correct one - which is exactly what it did.
+    if (settled) return;
     const t = Math.min(1, (now - start) / duration);
-    // Same easing as the CSS spring, so numbers and bars settle together.
     const eased = 1 - Math.pow(1 - t, 3);
     node.textContent = Math.round(target * eased);
     if (t < 1) requestAnimationFrame(step);
+    else finish();
   };
+
+  node.textContent = "0";
   requestAnimationFrame(step);
+
+  // Phones throttle animation frames hard when a tab is busy or backgrounded.
+  // A stalled count would otherwise leave a wrong number on screen for good.
+  setTimeout(finish, duration + 400);
 }
 
 function revealOnScroll() {
