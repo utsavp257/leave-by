@@ -67,7 +67,11 @@ class Source:
     # Seconds of travel time. Yellow has no such column and it is derived.
     duration_seconds: str
     # What the rider is charged, tips excluded - a tip is a choice, not a fare.
-    fare: str
+    # Named columns rather than a SQL string, because which of them exist
+    # depends on the month. See `fare_expression`.
+    fare_add: tuple
+    fare_sub: tuple = ()
+    required: str = ""
     company: str | None = None
 
     def url(self, year: int, month: int) -> str:
@@ -81,11 +85,11 @@ SOURCES = {
         pickup="pickup_datetime",
         dropoff="dropoff_datetime",
         duration_seconds="trip_time",
-        fare=(
-            "coalesce(base_passenger_fare,0) + coalesce(tolls,0) + coalesce(bcf,0)"
-            " + coalesce(sales_tax,0) + coalesce(congestion_surcharge,0)"
-            " + coalesce(airport_fee,0) + coalesce(cbd_congestion_fee,0)"
+        fare_add=(
+            "base_passenger_fare", "tolls", "bcf", "sales_tax",
+            "congestion_surcharge", "airport_fee", "cbd_congestion_fee",
         ),
+        required="base_passenger_fare",
         company="hvfhs_license_num",
     ),
     "yellow": Source(
@@ -95,9 +99,47 @@ SOURCES = {
         dropoff="tpep_dropoff_datetime",
         duration_seconds="date_diff('second', tpep_pickup_datetime, tpep_dropoff_datetime)",
         # total_amount includes the tip, so it is taken back out.
-        fare="coalesce(total_amount,0) - coalesce(tip_amount,0)",
+        fare_add=("total_amount",),
+        fare_sub=("tip_amount",),
+        required="total_amount",
     ),
 }
+
+
+def columns_of(con, url: str) -> dict[str, str]:
+    """Lower-cased column name to its actual spelling in this file.
+
+    Reads the parquet footer only, so it costs a range request rather than a
+    download.
+    """
+    rows = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{url}')").fetchall()
+    return {row[0].lower(): row[0] for row in rows}
+
+
+def fare_expression(source: Source, available: dict[str, str]) -> tuple[str, list[str]]:
+    """Build the fare sum from the columns this month actually has.
+
+    TLC's schema moves. `cbd_congestion_fee` only appears once congestion
+    pricing starts in 2025, and `airport_fee` has shipped as both `airport_fee`
+    and `Airport_fee` in different months. A fixed SQL string binds fine against
+    one month and fails against the next, so the expression is assembled per
+    file and the missing pieces are reported rather than assumed to be zero.
+    """
+    if source.required and source.required.lower() not in available:
+        raise RuntimeError(
+            f"{source.name}: no {source.required} column - the schema has changed "
+            f"in a way this pipeline cannot interpret."
+        )
+
+    terms, missing = [], []
+    for name in source.fare_add:
+        actual = available.get(name.lower())
+        terms.append(f"coalesce({actual},0)") if actual else missing.append(name)
+    for name in source.fare_sub:
+        actual = available.get(name.lower())
+        terms.append(f"-coalesce({actual},0)") if actual else missing.append(name)
+
+    return " + ".join(terms).replace("+ -", "- "), missing
 
 
 def connect() -> duckdb.DuckDBPyConnection:
@@ -144,6 +186,10 @@ def fetch_month(con, source: Source, year: int, month: int) -> int:
     url = source.url(year, month)
     verify_units(con, source, url)
 
+    fare, missing = fare_expression(source, columns_of(con, url))
+    if missing:
+        print(f"{source.name} {year}-{month:02d}  no {', '.join(missing)} this month")
+
     company = f"{source.company} AS company," if source.company else "'' AS company,"
     airport_ids = ", ".join(str(i) for i in AIRPORTS)
     out = CACHE / f"{source.name}_{year:04d}-{month:02d}.parquet"
@@ -166,7 +212,7 @@ def fetch_month(con, source: Source, year: int, month: int) -> int:
               AND dayofweek({source.pickup}) BETWEEN 1 AND 5
               AND ({source.duration_seconds}) > 0
               AND ({source.duration_seconds}) < 60 * 60 * 6
-              AND ({source.fare}) BETWEEN 0 AND 500
+              AND ({fare}) BETWEEN 0 AND 500
             GROUP BY ALL
         ) TO '{out}' (FORMAT PARQUET)
         """
@@ -180,7 +226,7 @@ def fetch_month(con, source: Source, year: int, month: int) -> int:
                 DOLocationID AS airport,
                 PULocationID AS origin,
                 {sql_block_expression(source.pickup)} AS block,
-                least(cast(round({source.fare}) AS INTEGER), {MAX_FARE}) AS dollars,
+                least(cast(round({fare}) AS INTEGER), {MAX_FARE}) AS dollars,
                 count(*) AS n
             FROM read_parquet('{url}')
             WHERE DOLocationID IN ({airport_ids})
@@ -188,7 +234,7 @@ def fetch_month(con, source: Source, year: int, month: int) -> int:
               AND dayofweek({source.pickup}) BETWEEN 1 AND 5
               AND ({source.duration_seconds}) > 0
               AND ({source.duration_seconds}) < 60 * 60 * 6
-              AND ({source.fare}) BETWEEN 0 AND 500
+              AND ({fare}) BETWEEN 0 AND 500
             GROUP BY ALL
         ) TO '{fares}' (FORMAT PARQUET)
         """
