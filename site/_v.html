@@ -195,6 +195,17 @@
   who asked this question first.</p>
 </footer>
 
+
+<pre id="err" style="color:#f88;font:12px monospace;padding:1rem">clean</pre>
+<script>window.addEventListener('error',e=>{document.getElementById('err').textContent='ERROR: '+e.message+' @'+e.lineno;});
+window.addEventListener('unhandledrejection',e=>{document.getElementById('err').textContent='REJECT: '+(e.reason&&e.reason.message||e.reason);});</script>
 <script src="app.js"></script>
+<script>setTimeout(()=>{
+ const pressed=[...document.querySelectorAll('#block button')].find(b=>b.getAttribute('aria-pressed')==='true');
+ const e=document.getElementById('err');
+ e.textContent+=' | default block="'+(pressed?pressed.textContent:'none')+'" (clock '+new Date().getHours()+'h)';
+ const shade=[...document.querySelectorAll('#shade button')].find(b=>b.textContent.match(/Train or car/i));
+ if(shade){shade.click(); e.textContent+=' | verdict legend: '+document.getElementById('legend-low').textContent.trim();}
+},1800);</script>
 </body>
 </html>

@@ -25,18 +25,41 @@ const BLOCK_LABELS = {
 const SHADE_MODES = {
   leave: { label: "Leave-by", low: "quicker", high: "longer" },
   buffer: { label: "Unpredictability", low: "steady", high: "wild" },
+  // Categorical, not a ramp: the answer here is a decision, not a quantity.
+  verdict: { label: "Train or car", categorical: true },
+};
+
+const VERDICT_FILL = {
+  transit: "var(--transit)",
+  car: "var(--car)",
+  "too close to call": "#5b6a7e",
 };
 
 const RAMP = ["--s1", "--s2", "--s3", "--s4", "--s5"];
+
+/* Which part of the day it is where the reader is sitting. The page opens on
+ * that rather than on a fixed rush hour, because the first question anyone has
+ * is about leaving now. */
+function blockNow() {
+  const minutes = new Date().getHours() * 60 + new Date().getMinutes();
+  const bounds = [
+    ["early", 0, 420], ["am", 420, 600], ["midday", 600, 960],
+    ["pm", 960, 1140], ["evening", 1140, 1440],
+  ];
+  const found = bounds.find(([, from, to]) => minutes >= from && minutes < to);
+  return found ? found[0] : "pm";
+}
 
 const state = {
   data: null,
   map: null,
   airport: "JFK",
-  block: "pm",
+  block: blockNow(),
   shade: "leave",
   origin: null,
   pin: null,
+  view: null,     // the live viewBox, which zooming moves
+  panned: false,  // set while dragging so a pan is not read as a tap
 };
 
 const el = (id) => document.getElementById(id);
@@ -101,7 +124,8 @@ const AIRPORT_ZONES = { JFK: "132", LGA: "138", EWR: "1" };
 
 function drawMap() {
   const svg = el("map");
-  svg.setAttribute("viewBox", state.map.viewbox.join(" "));
+  state.view = state.map.viewbox.slice();
+  applyView();
   const frag = document.createDocumentFragment();
 
   for (const [id, shape] of Object.entries(state.map.zones)) {
@@ -125,11 +149,14 @@ function drawMap() {
   svg.addEventListener("pointermove", onHover);
   svg.addEventListener("pointerleave", hideTip);
   svg.addEventListener("click", (event) => {
+    // A drag that ends over a zone is a pan, not a choice.
+    if (state.panned) return;
     const direct = event.target.closest(".zone-live");
     const id = direct ? direct.dataset.zone : nearestZone(event);
     if (!id) return;
     select(id);
   });
+  wireZoom(svg);
 }
 
 /* Midtown is about four pixels wide on a phone, so requiring a direct hit makes
@@ -138,7 +165,7 @@ function drawMap() {
 function nearestZone(event) {
   const svg = el("map");
   const rect = svg.getBoundingClientRect();
-  const [vx, vy, vw, vh] = state.map.viewbox;
+  const [vx, vy, vw, vh] = state.view;
   const x = vx + ((event.clientX - rect.left) / rect.width) * vw;
   const y = vy + ((event.clientY - rect.top) / rect.height) * vh;
 
@@ -177,6 +204,7 @@ function valueFor(zone) {
 }
 
 function paintMap() {
+  if (SHADE_MODES[state.shade].categorical) return paintVerdictMap();
   const zones = zonesForAirport();
   const values = [];
   for (const zone of Object.values(zones)) {
@@ -218,6 +246,49 @@ function paintMap() {
     if (id === state.origin) path.classList.add("zone-selected");
   }
 
+  placePin();
+
+  const mode = SHADE_MODES[state.shade];
+  el("legend-ramp").style.display = "";
+  el("legend-low").textContent = `${mode.low} · ${values[0]} min`;
+  el("legend-high").textContent = `${values[values.length - 1]} min · ${mode.high}`;
+}
+
+/* Shade by which way wins, rather than by how long it takes. Zones with no
+ * measured train option are left dark: there is no decision to colour. */
+function paintVerdictMap() {
+  const zones = zonesForAirport();
+  const airportZone = AIRPORT_ZONES[state.airport];
+  const tally = { transit: 0, car: 0, "too close to call": 0 };
+
+  for (const path of el("map").querySelectorAll(".zone")) {
+    const id = path.dataset.zone;
+    path.classList.remove("zone-live", "zone-dead", "zone-airport", "zone-selected");
+    path.style.fill = "";
+
+    if (id === airportZone) { path.classList.add("zone-airport"); continue; }
+
+    const cell = zones[id] && zones[id].blocks[state.block];
+    if (!cell || !cell.car) { path.classList.add("zone-dead"); continue; }
+
+    path.classList.add("zone-live");
+    if (id === state.origin) path.classList.add("zone-selected");
+    if (!cell.transit) { path.style.fill = "var(--s1)"; continue; }
+    path.style.fill = VERDICT_FILL[cell.verdict] || "var(--s1)";
+    if (cell.verdict in tally) tally[cell.verdict] += 1;
+  }
+
+  placePin();
+  const legend = el("legend-low");
+  legend.innerHTML =
+    `<span class="key"><i style="background:var(--transit)"></i>train ${tally.transit}</span>` +
+    `<span class="key"><i style="background:var(--car)"></i>car ${tally.car}</span>` +
+    `<span class="key"><i style="background:#5b6a7e"></i>too close ${tally["too close to call"]}</span>`;
+  el("legend-high").textContent = "";
+  el("legend-ramp").style.display = "none";
+}
+
+function placePin() {
   const shape = state.map.zones[state.origin];
   if (shape && shape.c) {
     state.pin.setAttribute("transform", `translate(${shape.c[0]} ${shape.c[1]})`);
@@ -225,10 +296,6 @@ function paintMap() {
   } else {
     state.pin.classList.remove("on");
   }
-
-  const mode = SHADE_MODES[state.shade];
-  el("legend-low").textContent = `${mode.low} · ${values[0]} min`;
-  el("legend-high").textContent = `${values[values.length - 1]} min · ${mode.high}`;
 }
 
 function onHover(event) {
@@ -241,9 +308,18 @@ function onHover(event) {
   const shell = el("map").getBoundingClientRect();
   const box = path.getBoundingClientRect();
 
-  tip.innerHTML = value == null
-    ? `<b>${path.dataset.name}</b>`
-    : `<b>${zone.zone}</b><span>${value} min ${state.shade === "buffer" ? "of slack" : "before your flight"}</span>`;
+  const cell = zone && zone.blocks[state.block];
+  let detail = "";
+  if (SHADE_MODES[state.shade].categorical) {
+    detail = cell && cell.transit
+      ? { transit: "train wins", car: "car wins", "too close to call": "too close to call" }[cell.verdict]
+      : "no measured train";
+  } else if (value != null) {
+    detail = `${value} min ${state.shade === "buffer" ? "of slack" : "before your flight"}`;
+  }
+  tip.innerHTML = zone
+    ? `<b>${zone.zone}</b>${detail ? `<span>${detail}</span>` : ""}`
+    : `<b>${path.dataset.name}</b>`;
   tip.style.left = `${box.left + box.width / 2 - shell.left}px`;
   tip.style.top = `${box.top - shell.top}px`;
   tip.classList.add("on");
@@ -251,6 +327,143 @@ function onHover(event) {
 
 function hideTip() {
   el("tip").classList.remove("on");
+}
+
+/* ── zoom and pan ─────────────────────────────────────────── */
+
+const MAX_ZOOM = 6;
+
+function applyView() {
+  el("map").setAttribute("viewBox", state.view.join(" "));
+  const base = state.map.viewbox;
+  const zoomed = state.view[2] < base[2] * 0.999;
+  el("map-card").classList.toggle("is-zoomed", zoomed);
+}
+
+/* Scale about a fixed point, so the place under the cursor or between the
+ * fingers stays where it is. Zooming about the centre instead makes the map
+ * slide away from whatever you were looking at. */
+function zoomAbout(factor, clientX, clientY) {
+  const base = state.map.viewbox;
+  const rect = el("map").getBoundingClientRect();
+  const [x, y, w, h] = state.view;
+
+  let next = w / factor;
+  next = Math.min(base[2], Math.max(base[2] / MAX_ZOOM, next));
+  const scale = next / w;
+  if (scale === 1) return;
+
+  // Where the anchor sits in the current frame, as a fraction. The buttons pass
+  // no coordinates, so they zoom about the middle; testing the rect instead of
+  // the argument produced NaN and a viewBox the browser could not parse.
+  const fx = clientX == null || !rect.width ? 0.5 : (clientX - rect.left) / rect.width;
+  const fy = clientY == null || !rect.height ? 0.5 : (clientY - rect.top) / rect.height;
+  const ax = x + w * fx;
+  const ay = y + h * fy;
+
+  state.view = clampView([ax - next * fx, ay - (h * scale) * fy, next, h * scale]);
+  applyView();
+}
+
+/* Keep at least the middle of the city on screen. Without this a stray drag
+ * leaves you looking at empty ocean with no way to tell which way is back. */
+function clampView([x, y, w, h]) {
+  const [bx, by, bw, bh] = state.map.viewbox;
+  const slackX = Math.max(0, bw - w);
+  const slackY = Math.max(0, bh - h);
+  return [
+    Math.min(bx + slackX, Math.max(bx - w * 0.15, x)),
+    Math.min(by + slackY, Math.max(by - h * 0.15, y)),
+    w,
+    h,
+  ];
+}
+
+function panBy(dxClient, dyClient) {
+  const rect = el("map").getBoundingClientRect();
+  if (!rect.width) return;
+  const [x, y, w, h] = state.view;
+  state.view = clampView([
+    x - (dxClient / rect.width) * w,
+    y - (dyClient / rect.height) * h,
+    w,
+    h,
+  ]);
+  applyView();
+}
+
+function resetView() {
+  state.view = state.map.viewbox.slice();
+  applyView();
+}
+
+function wireZoom(svg) {
+  el("zoom-in").addEventListener("click", () => zoomAbout(1.5));
+  el("zoom-out").addEventListener("click", () => zoomAbout(1 / 1.5));
+  el("zoom-reset").addEventListener("click", resetView);
+
+  // Trackpad pinch arrives as a wheel event with ctrlKey set. Plain scrolling
+  // is left alone so the page still scrolls when the pointer crosses the map.
+  svg.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    zoomAbout(Math.exp(-event.deltaY / 180), event.clientX, event.clientY);
+  }, { passive: false });
+
+  const points = new Map();
+  let startSpread = 0;
+  let startWidth = 0;
+  let last = null;
+
+  svg.addEventListener("pointerdown", (event) => {
+    svg.setPointerCapture(event.pointerId);
+    points.set(event.pointerId, event);
+    state.panned = false;
+    if (points.size === 2) {
+      const [a, b] = [...points.values()];
+      startSpread = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      startWidth = state.view[2];
+    } else {
+      last = { x: event.clientX, y: event.clientY, moved: 0 };
+    }
+  });
+
+  svg.addEventListener("pointermove", (event) => {
+    if (!points.has(event.pointerId)) return;
+    points.set(event.pointerId, event);
+
+    if (points.size === 2) {
+      const [a, b] = [...points.values()];
+      const spread = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      if (startSpread > 0) {
+        state.panned = true;
+        const target = startWidth / (spread / startSpread);
+        zoomAbout(state.view[2] / target, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+      }
+      return;
+    }
+
+    if (!last) return;
+    const dx = event.clientX - last.x;
+    const dy = event.clientY - last.y;
+    last.moved += Math.abs(dx) + Math.abs(dy);
+    // Six pixels of slop, so a tap with a shaky hand still selects.
+    if (last.moved > 6) {
+      state.panned = true;
+      hideTip();
+      panBy(dx, dy);
+    }
+    last.x = event.clientX;
+    last.y = event.clientY;
+  });
+
+  const release = (event) => {
+    points.delete(event.pointerId);
+    if (points.size < 2) startSpread = 0;
+    if (points.size === 0) last = null;
+  };
+  svg.addEventListener("pointerup", release);
+  svg.addEventListener("pointercancel", release);
 }
 
 /* ── choosing a default ───────────────────────────────────── */

@@ -74,7 +74,7 @@
                the colours. -->
           <div class="segmented segmented-small" id="shade" role="group" aria-label="Map shading"></div>
           <span id="legend-low">quicker</span>
-          <span class="legend-ramp" id="legend-ramp" aria-hidden="true">
+          <span class="legend-ramp" aria-hidden="true">
             <i style="background:var(--s1)"></i><i style="background:var(--s2)"></i><i style="background:var(--s3)"></i><i style="background:var(--s4)"></i><i style="background:var(--s5)"></i>
           </span>
           <span id="legend-high">longer</span>
@@ -195,6 +195,25 @@
   who asked this question first.</p>
 </footer>
 
+
+<pre id="err" style="color:#f88;font:12px monospace;padding:1rem">clean</pre>
+<script>
+window.addEventListener('error', e => { document.getElementById('err').textContent = 'ERROR: '+e.message+' @'+e.lineno; });
+window.addEventListener('unhandledrejection', e => { document.getElementById('err').textContent = 'REJECT: '+(e.reason&&e.reason.message||e.reason); });
+</script>
 <script src="app.js"></script>
+<script>
+setTimeout(()=>{
+  const before = document.getElementById('map').getAttribute('viewBox');
+  document.getElementById('zoom-in').click();
+  document.getElementById('zoom-in').click();
+  const zoomed = document.getElementById('map').getAttribute('viewBox');
+  const resetShown = getComputedStyle(document.getElementById('zoom-reset')).display;
+  document.getElementById('zoom-reset').click();
+  const after = document.getElementById('map').getAttribute('viewBox');
+  const e=document.getElementById('err');
+  e.textContent += ' | base='+before+' | zoomed='+zoomed+' | resetVisible='+resetShown+' | restored='+(after===before);
+},1800);
+</script>
 </body>
 </html>

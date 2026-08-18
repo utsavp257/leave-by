@@ -45,6 +45,10 @@ MIN_PART_FRACTION = 0.001
 VIEWBOX = 1000
 PRECISION = 1
 
+ZOOM = 1.0
+"""The published frame is the true bounding box. Zooming is the reader's
+choice, made in the page, not baked into the data."""
+
 OFF_MAP = {1}
 """Newark Airport: real, but far outside the frame this map wants."""
 
@@ -176,12 +180,44 @@ def build() -> dict:
                     continue
                 x, y = pair.split(" ")
                 xs.append(float(x)); ys.append(float(y))
-    pad = 6
-    box = [round(min(xs) - pad, 1), round(min(ys) - pad, 1),
-           round(max(xs) - min(xs) + pad * 2, 1), round(max(ys) - min(ys) + pad * 2, 1)]
+    # A modest crop. The city runs diagonally from Staten Island in the
+    # south-west to the Bronx in the north-east, so its bounding box has two
+    # corners of open water in it and the map reads smaller than the card it
+    # sits in. Insetting the frame eats that water first. Anything the crop
+    # would actually cut is listed below, so the trade is visible rather than
+    # discovered later.
+    left, top = min(xs), min(ys)
+    width, height = max(xs) - left, max(ys) - top
+    inset = (1 - 1 / ZOOM) / 2
+    box = [
+        round(left + width * inset, 1),
+        round(top + height * inset, 1),
+        round(width / ZOOM, 1),
+        round(height / ZOOM, 1),
+    ]
+
+    clipped = []
+    for zid, shape in shapes.items():
+        pts = [
+            tuple(float(v) for v in pair.split(" "))
+            for chunk in shape["d"].replace("Z", "").split("M")
+            for pair in chunk.split("L")
+            if pair.strip()
+        ]
+        outside = sum(
+            1 for x, y in pts
+            if x < box[0] or y < box[1] or x > box[0] + box[2] or y > box[1] + box[3]
+        )
+        if outside:
+            clipped.append((shape["name"], outside / len(pts)))
 
     print(f"zones      {len(shapes)}")
-    print(f"viewbox    {box}")
+    print(f"viewbox    {box}  (zoom {ZOOM})")
+    if clipped:
+        worst = sorted(clipped, key=lambda c: -c[1])[:6]
+        print(f"clipped    {len(clipped)} zones touch the frame edge:")
+        for name, share in worst:
+            print(f"             {name[:38]:<40} {share:.0%} of its outline")
     print(f"vertices   {dropped_points:,} -> {kept_points:,}")
     print(f"parts      {dropped_parts:,} slivers dropped")
 

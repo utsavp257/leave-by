@@ -229,8 +229,40 @@ h1 em {
 .segmented-small button { font-size: 0.62rem; padding: 0.3rem 0.6rem; letter-spacing: 0.05em; }
 @media (max-width: 560px) { .map-legend { row-gap: 0.5rem; } .segmented-small { order: -1; width: 100%; } }
 
+/* Categorical legend: three swatches instead of a gradient. */
+.key { display: inline-flex; align-items: center; gap: 0.35rem; margin-right: 0.7rem; }
+.key i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+#legend-low { display: flex; flex-wrap: wrap; align-items: center; }
+
 .legend-ramp { display: flex; height: 7px; flex: 1 1 120px; min-width: 100px; border-radius: 999px; overflow: hidden; }
 .legend-ramp i { flex: 1; }
+
+/* Zoom controls. Quiet until wanted: the reset only appears once the frame has
+   actually moved, so an untouched map carries two small buttons and no clutter. */
+.zoom {
+  position: absolute; top: 8px; right: 8px; z-index: 3;
+  display: flex; gap: 4px; align-items: center;
+}
+.zoom button {
+  font: inherit; font-family: var(--mono); font-size: 0.78rem; line-height: 1;
+  min-width: 30px; height: 30px; padding: 0 0.5rem;
+  color: var(--ink-2); cursor: pointer;
+  background: rgba(19, 26, 36, 0.82);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--edge); border-radius: 8px;
+  transition: color 0.2s var(--spring), border-color 0.2s var(--spring);
+}
+.zoom button:hover { color: var(--ink); border-color: var(--transit); }
+#zoom-reset { display: none; font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.map-card.is-zoomed #zoom-reset { display: block; }
+
+/* `pan-y`, not `none`. The map fills most of a phone screen, and taking every
+   touch gesture would mean a finger landing on it could not scroll the page —
+   the reader would be stuck at the map with no way past it. Vertical drags stay
+   with the browser so the page still scrolls; pinch and horizontal drags reach
+   the map. The zoom buttons cover what that gives up. */
+.map-svg { touch-action: pan-y; cursor: grab; }
+.map-svg:active { cursor: grabbing; }
 
 .map-tip {
   position: absolute; pointer-events: none; z-index: 4; left: 0; top: 0;
