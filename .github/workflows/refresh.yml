@@ -115,4 +115,18 @@ jobs:
           fi
           git add site/data
           git commit -m "Refresh airport travel times through ${{ steps.window.outputs.end }}"
-          git push
+
+          # Rebase and retry rather than fail. A run can take half an hour, and
+          # anything pushed to main in the meantime rejects this push - which
+          # threw away a completed run's work once, having done all the fetching.
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "push rejected, rebasing onto origin/main"
+            git pull --rebase --autostash origin main || exit 1
+            sleep 5
+          done
+          echo "could not push after three attempts"
+          exit 1
