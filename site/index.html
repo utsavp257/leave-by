@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>When to leave for the airport</title>
+<meta name="description" content="How long it really takes to reach JFK, LaGuardia and Newark from your neighbourhood — by car and by train — measured from millions of recorded trips, with the worst case shown rather than the average.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="masthead wrap">
+  <p class="eyebrow">Recorded trips <span class="rule"></span> <span id="trip-count">JFK · LaGuardia · Newark</span> <span class="rule"></span> New York City</p>
+  <h1>You are not late.<br>You left <em>too late</em>.</h1>
+  <div class="standfirst">
+    <p>Nobody plans a flight around a typical journey. You plan around the journey
+    that goes wrong. So the number that matters is not how long the trip takes —
+    it is <strong>how long it takes on a bad day</strong>.</p>
+    <p>Here is that number, from your neighbourhood, by car and by train.</p>
+  </div>
+
+  <p class="byline">
+    <span class="byline-label">Built by Utsav Patel</span>
+    <a class="link-chip" href="https://github.com/utsavp257" target="_blank" rel="noopener">GitHub</a>
+    <a class="link-chip" href="https://www.linkedin.com/in/utsav-patel-478664223/" target="_blank" rel="noopener">LinkedIn</a>
+  </p>
+</header>
+
+<section class="band wrap" aria-labelledby="then-now-heading">
+  <div class="section-head">
+    <span class="marker">First, the thing nobody tells you</span>
+    <h2 id="then-now-heading">The same seventeen miles, <em>half again</em> as long</h2>
+    <p>In 2015 Todd Schneider measured this exact trip — Midtown to JFK, leaving
+    between ten and eleven in the morning — across a billion taxi records. It took
+    38 minutes. The road has not moved. The trip has.</p>
+  </div>
+
+  <div class="then-now">
+    <div class="tn-card">
+      <div class="tn-when">Taxi, 2009–2015</div>
+      <p class="tn-value">38</p>
+      <div class="tn-unit">minutes, typical</div>
+      <p class="tn-note">Measured by Todd Schneider from 1.1 billion trips.</p>
+    </div>
+    <div class="tn-card tn-card-now">
+      <div class="tn-when">Uber and Lyft, 2026</div>
+      <p class="tn-value">62</p>
+      <div class="tn-unit">minutes, typical</div>
+      <p class="tn-note">Same origin zone, same hour, same 17.2 miles.</p>
+    </div>
+    <div class="tn-card">
+      <div class="tn-when">Yellow cab, 2026</div>
+      <p class="tn-value">59</p>
+      <div class="tn-unit">minutes, typical</div>
+      <p class="tn-note">Checked separately, in case the app was the problem. It is not.</p>
+    </div>
+  </div>
+
+  <p class="footnote">Todd's figure is an average across 2009 to mid-2015, not a
+  snapshot of its final year, so read this as a decade of drift rather than a
+  single event. Ride-hail growth, delivery traffic and street redesign all sit
+  inside it, and this page does not try to separate them.</p>
+</section>
+
+<section class="band band-paper" aria-labelledby="picker-heading">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="marker">Your trip</span>
+      <h2 id="picker-heading">When do <em>you</em> have to leave?</h2>
+      <p>Pick where you are starting and when. The solid bar is a typical journey.
+      The hatched part is everything after it — the delay you cannot plan away.
+      Leave by the end of the hatching and you make your flight on nine days in ten.</p>
+    </div>
+
+    <div class="controls">
+      <label class="field">
+        <span class="field-label">Starting from</span>
+        <select id="origin"></select>
+      </label>
+      <div class="field">
+        <span class="field-label">Flying out of</span>
+        <div class="segmented" id="airport" role="group" aria-label="Airport"></div>
+      </div>
+    </div>
+
+    <div class="field" style="margin-bottom:2rem">
+      <span class="field-label">Leaving at</span>
+      <div class="segmented" id="block" role="group" aria-label="Time of day"></div>
+    </div>
+
+    <p class="verdict" id="verdict"></p>
+    <div class="bars" id="bars"></div>
+    <div class="evidence" id="evidence"></div>
+  </div>
+</section>
+
+<section class="band wrap" aria-labelledby="shuttle-heading">
+  <div class="section-head">
+    <span class="marker">One more thing</span>
+    <h2 id="shuttle-heading">The shuttle is a <em>price</em> answer, not a safety one</h2>
+  </div>
+  <div class="prose">
+    <p>Uber Shuttle runs fixed routes to all three airports for a fraction of a
+    car fare, and it is a genuinely good deal. It is not a genuinely safer bet.</p>
+    <p>It drives the same roads as every other car, so it draws its travel time
+    from the same distribution — <strong>and it inherits the whole tail</strong>.
+    Fixed stops and a wait of up to half an hour can only add to it. Cheaper, yes.
+    More reliable, no.</p>
+    <p>There is no public trip data for it, so this is reasoning from the road
+    network rather than measurement. It is stated here because "just take the
+    shuttle" circulates as general airport advice, and it is advice about your
+    wallet being mistaken for advice about your flight.</p>
+  </div>
+</section>
+
+<footer class="colophon wrap">
+  <p><strong>How this was measured.</strong> Car times come from the
+  Taxi &amp; Limousine Commission's trip records — every high-volume for-hire and
+  yellow cab trip, weekdays only, as percentiles over whole minutes. Train times
+  come from observed subway movements, with the walk, the wait and the AirTrain
+  or Q70 leg modelled rather than measured, and combined so that percentiles are
+  convolved rather than added.</p>
+  <p>Because that last combination is done conservatively, the transit figures
+  are slightly pessimistic. Where the train wins, it wins by at least as much as
+  shown.</p>
+  <p>LaGuardia's bus leg is averaged by the MTA over a month, a weekday and an
+  hour before it is published, which hides how bad the worst buses are. Newark
+  has no assembled transit option here: New Jersey Transit publishes punctuality
+  percentages, and a percentage cannot be turned into a journey time.</p>
+  <p>Data: NYC TLC trip records, MTA bus route segment speeds, and subway
+  movements by way of <a href="https://github.com/utsavp257/stringline">stringline</a>.
+  Prior work: <a href="https://toddwschneider.com/posts/analyzing-1-1-billion-nyc-taxi-and-uber-trips-with-a-vengeance/">Todd Schneider</a>,
+  who asked this question first.</p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

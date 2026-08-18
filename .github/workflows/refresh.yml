@@ -1,0 +1,99 @@
+name: Refresh
+
+# The city publishes trip records about two months behind, so there is nothing
+# to gain from running this more often than monthly.
+#
+# It runs here rather than on a laptop because the heavy step is network, not
+# processor: DuckDB reads half-gigabyte parquet files straight off the CDN, and
+# a runner has far more bandwidth than a home connection. Nothing large is ever
+# written to disk. Public repositories get standard runners free and unlimited,
+# so the only real limit is the six hour cap on a single job - which is why a
+# long backfill should be run in chunks through the manual trigger below.
+
+on:
+  schedule:
+    - cron: "0 6 5 * *"
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "First month to fetch, as YYYY-MM"
+        required: true
+      end:
+        description: "Last month to fetch, as YYYY-MM"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The subway side comes from stringline's published aggregates. Checked
+      # out read-only; this workflow never writes to it.
+      - uses: actions/checkout@v4
+        with:
+          repository: utsavp257/stringline
+          path: stringline
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      # Cached so a monthly run fetches one new month rather than the whole
+      # corpus. The key carries the month so the cache rolls forward.
+      - uses: actions/cache@v4
+        with:
+          path: data
+          key: tlc-${{ github.event.inputs.end || 'monthly' }}-${{ github.run_id }}
+          restore-keys: |
+            tlc-${{ github.event.inputs.end || 'monthly' }}-
+            tlc-
+
+      - name: Work out which months to fetch
+        id: window
+        run: |
+          if [ -n "${{ github.event.inputs.start }}" ]; then
+            echo "start=${{ github.event.inputs.start }}" >> "$GITHUB_OUTPUT"
+            echo "end=${{ github.event.inputs.end }}" >> "$GITHUB_OUTPUT"
+          else
+            # Two months back, which is roughly when TLC catches up.
+            echo "start=$(date -u -d '2 months ago' +%Y-%m)" >> "$GITHUB_OUTPUT"
+            echo "end=$(date -u -d '2 months ago' +%Y-%m)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Airport trips
+        run: python -m data_prep.tlc "${{ steps.window.outputs.start }}" "${{ steps.window.outputs.end }}"
+
+      - name: Rebuild
+        run: |
+          python -m data_prep.car_times
+          python -m data_prep.bus_times
+          python -m data_prep.transit_times --stringline stringline/site/data
+          python -m data_prep.leave_by
+
+      # The tests check the contract between the page and the data it reads, so
+      # they run after the rebuild and before anything is committed. A broken
+      # build should stay uncommitted.
+      - name: Test
+        run: python -m pytest tests/ -q
+
+      - name: Commit if anything changed
+        run: |
+          git config user.name "Utsav"
+          git config user.email "patelutsav257@gmail.com"
+          if git diff --quiet -- site/data; then
+            echo "No change."
+            exit 0
+          fi
+          git add site/data
+          git commit -m "Refresh airport travel times through ${{ steps.window.outputs.end }}"
+          git push
