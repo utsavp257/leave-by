@@ -178,7 +178,7 @@ def fetch_month(con, source: Source, year: int, month: int):
             least(cast(floor(({duration}) / 60.0) AS INTEGER), {MAX_MINUTES}) AS minutes,
             least(cast(round({fare}) AS INTEGER), {MAX_FARE}) AS dollars,
             ({duration}) AS seconds,
-            abs(({duration}) - date_diff('second', {source.pickup}, {source.dropoff})) AS gap
+            date_diff('second', {source.pickup}, {source.dropoff}) AS delta
         FROM read_parquet('{url}')
         WHERE DOLocationID IN ({airport_ids})
           AND PULocationID IS NOT NULL
@@ -206,24 +206,42 @@ def fetch_month(con, source: Source, year: int, month: int):
     return written
 
 
-def verify_units(con, source: Source, url: str, tolerance_seconds: float = 12.0) -> None:
-    """Confirm the duration column really is seconds.
+UNIT_RATIO_RANGE = (0.5, 2.0)
+"""How far the duration column may drift from the timestamps before it is
+treated as a different unit. Wide on purpose: the mistake being caught is
+minutes reported as seconds, which shows up as a ratio near 60 or near 1/60,
+not as a few seconds of disagreement."""
 
-    Runs against the materialised month rather than the remote file, so it costs
-    nothing extra. If the column ever changes unit, or a source swaps minutes for
-    seconds, this fails loudly here rather than producing a plausible-looking
-    answer that is wrong by a factor of sixty.
+
+def unit_ratio_ok(ratio) -> bool:
+    if ratio is None:
+        return False
+    low, high = UNIT_RATIO_RANGE
+    return low <= ratio <= high
+
+
+def verify_units(con, source: Source, url: str) -> None:
+    """Confirm the duration column is in the same unit as the timestamps.
+
+    Compares the two as a ratio rather than a difference. An earlier version
+    allowed twelve seconds of absolute drift and rejected May 2026, where the
+    median trip_time is 2674 seconds against a timestamp delta of 2649 - a ratio
+    of exactly 1.0 and about twenty seconds of ordinary reporting noise between
+    what the app clocked and what the timestamps say. An absolute tolerance
+    cannot tell that apart from a real problem; a ratio can, and it still catches
+    the failure that matters, where minutes are reported as seconds and the ratio
+    lands near sixty or near a sixtieth.
     """
-    n, gap = con.execute(
-        "SELECT count(*), avg(gap) FROM trips WHERE seconds > 600"
+    n, ratio = con.execute(
+        "SELECT count(*), median(seconds / nullif(delta, 0)) FROM trips WHERE seconds > 600"
     ).fetchone()
     if not n:
         raise RuntimeError(f"{url}: no usable rows to check units against")
-    if gap is None or gap > tolerance_seconds:
+    if not unit_ratio_ok(ratio):
         raise RuntimeError(
-            f"{url}: {source.duration_seconds} disagrees with the timestamps by "
-            f"{gap:.0f} seconds on average. It may no longer be in seconds - "
-            f"check the data dictionary before trusting any output."
+            f"{url}: {source.duration_seconds} is {ratio:.4g}x the gap between the "
+            f"timestamps. It is probably no longer in seconds - check the data "
+            f"dictionary before trusting any output."
         )
 
 

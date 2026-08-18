@@ -70,3 +70,17 @@ def test_yellow_without_a_tip_column_still_builds():
     expression, missing = fare_expression(YELLOW, {"total_amount": "total_amount"})
     assert missing == ["tip_amount"]
     assert expression == "coalesce(total_amount,0)"
+
+
+def test_the_unit_guard_accepts_ordinary_noise_and_rejects_a_unit_change():
+    """May 2026 has a median trip_time of 2674s against a 2649s timestamp gap -
+    a ratio of 1.0 with about twenty seconds of reporting noise. An absolute
+    tolerance rejected that month; a ratio does not, while still catching the
+    minutes-reported-as-seconds mistake the check exists for."""
+    from data_prep.tlc import unit_ratio_ok
+
+    assert unit_ratio_ok(1.0)
+    assert unit_ratio_ok(2674 / 2649)
+    assert not unit_ratio_ok(1 / 60)
+    assert not unit_ratio_ok(60.0)
+    assert not unit_ratio_ok(None)
