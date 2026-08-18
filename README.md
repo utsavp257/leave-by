@@ -28,12 +28,12 @@ Transit fares, confirmed for 2026: the subway is $3.00, the AirTrain $8.75, and
 the Q70+ LaGuardia Link is free — so reaching LaGuardia by transit costs a
 single swipe.
 
-**Car fares are computed but not shown.** A real UberX quote from Herald Square
-to JFK came to $80, while the built figures put roughly 1% of trips in those
-zones at or below that. The gap is too wide to be a scheduled-versus-live
-discount and looks like a double count in the fare expression, so the numbers
-are withheld until `data_prep/check_fare.py` settles it. Travel times are
-unaffected.
+**Car fares are computed but not shown.** They are arithmetically correct —
+`base_passenger_fare` alone is $103–115 on this route, so nothing is double
+counted — but they sit above a real UberX quote of $80. The files carry every
+service tier with no column to separate them, so an all-tiers median is not the
+price most readers would be quoted. Held back until one live quote settles
+whether the gap is tier mix or surge. Travel times are unaffected.
 
 ## The data
 
