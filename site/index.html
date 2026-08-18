@@ -60,6 +60,10 @@
     </div>
 
     <div class="instrument">
+      <!-- Order matters on a phone: the answer comes first, the map explains it,
+           the detail follows. On a wide screen the grid puts them side by side. -->
+      <div class="card answer answer-lead rise" id="answer-lead" aria-live="polite"></div>
+
       <div class="card map-card rise">
         <div class="map-shell">
           <svg class="map-svg" id="map" viewBox="0 0 1000 1000" role="img"
@@ -75,7 +79,7 @@
         </div>
       </div>
 
-      <div class="card answer rise" id="answer" aria-live="polite"></div>
+      <div class="card answer answer-detail rise" id="answer-detail"></div>
     </div>
   </div>
 </section>

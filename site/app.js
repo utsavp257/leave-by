@@ -311,12 +311,16 @@ function fillSearchOptions() {
 /* ── the answer ───────────────────────────────────────────── */
 
 function renderAnswer() {
-  const host = el("answer");
+  const lead = el("answer-lead");
+  const detail = el("answer-detail");
   const zone = zonesForAirport()[state.origin];
-  host.innerHTML = "";
+  lead.innerHTML = "";
+  detail.innerHTML = "";
+  detail.hidden = false;
 
   if (!zone) {
-    host.innerHTML = `<p class="verdict">Pick a neighbourhood on the map to see when to leave.</p>`;
+    lead.innerHTML = `<p class="verdict">Pick a neighbourhood on the map to see when to leave.</p>`;
+    detail.hidden = true;
     return;
   }
 
@@ -324,13 +328,14 @@ function renderAnswer() {
   const place = document.createElement("div");
   place.className = "answer-place";
   place.textContent = `${zone.zone} · ${zone.borough} → ${state.airport}`;
-  host.appendChild(place);
+  lead.appendChild(place);
 
   if (!cell) {
     const none = document.createElement("p");
     none.className = "verdict";
     none.textContent = `Too few recorded trips from ${zone.zone} at this time of day to say anything honest.`;
-    host.appendChild(none);
+    lead.appendChild(none);
+    detail.hidden = true;
     return;
   }
 
@@ -346,13 +351,13 @@ function renderAnswer() {
   unit.className = "leave-by-unit";
   unit.textContent = `minutes ahead, leaving ${(BLOCK_LABELS[state.block] || "").toLowerCase()}`;
   headline.append(value, unit);
-  host.appendChild(headline);
+  lead.appendChild(headline);
   countTo(value, leaveBy);
 
   const verdict = document.createElement("p");
   verdict.className = "verdict";
   verdict.innerHTML = verdictLine(zone, cell);
-  host.appendChild(verdict);
+  lead.appendChild(verdict);
 
   const longest = Math.max(car ? car.p90 : 0, transit ? transit.p90 : 0, 30);
   const scale = Math.ceil(longest / 30) * 30;
@@ -370,7 +375,7 @@ function renderAnswer() {
     )
   );
   bars.appendChild(axisRow(scale));
-  host.appendChild(bars);
+  detail.appendChild(bars);
 
   const notes = [];
   if (transit) {
@@ -386,7 +391,7 @@ function renderAnswer() {
     const evidence = document.createElement("div");
     evidence.className = "evidence";
     evidence.innerHTML = notes.map((n) => `<p>${n}</p>`).join("");
-    host.appendChild(evidence);
+    detail.appendChild(evidence);
   }
 }
 

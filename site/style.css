@@ -166,8 +166,26 @@ h1 em {
 /* ── the instrument ───────────────────────────────────────── */
 
 .instrument { display: grid; gap: clamp(1rem, 2vw, 1.4rem); grid-template-columns: 1fr; }
+
 @media (min-width: 940px) {
-  .instrument { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); align-items: start; }
+  /* Wide: map on the left, the answer beside it in two stacked cards. */
+  .instrument {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    grid-template-areas: "map lead" "map detail";
+    grid-template-rows: auto 1fr;
+    align-items: start;
+  }
+  .map-card { grid-area: map; }
+  .answer-lead { grid-area: lead; }
+  .answer-detail { grid-area: detail; }
+}
+
+@media (max-width: 939px) {
+  /* Narrow: the number has to be on screen when the time buttons are tapped,
+     so it sits above the map rather than under it. The map is capped so the
+     detail below stays within a short scroll. */
+  .map-svg { max-height: 54vh; }
+  .answer-lead { gap: 0.7rem; }
 }
 
 .card {
