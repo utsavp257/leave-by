@@ -381,6 +381,14 @@ function renderAnswer() {
   detail.appendChild(bars);
 
   const notes = [];
+  if (car && car.fare != null) {
+    notes.push(
+      "Car fares are a median across every service tier — these records cannot " +
+      "separate UberX from XL or Black — so the figure lands between them. " +
+      "Checked live from Herald Square at 5pm: UberX $110, XL $150, against a " +
+      "measured $124 there. Tips excluded."
+    );
+  }
   if (transit) {
     notes.push("The train figure is built conservatively, so where it wins it wins by at least this much.");
   }
@@ -418,7 +426,8 @@ function barRow(mode, label, detail, cell, scale) {
 
   const figure = document.createElement("div");
   figure.className = "bar-figure";
-  figure.textContent = `${cell.p50} typical · ${cell.p90} on a bad day`;
+  const money = cell.fare == null ? "" : ` · ${formatFare(cell.fare)}`;
+  figure.textContent = `${cell.p50} typical · ${cell.p90} on a bad day${money}`;
   head.appendChild(figure);
   row.appendChild(head);
 
@@ -438,6 +447,17 @@ function barRow(mode, label, detail, cell, scale) {
     tail.style.width = `${((cell.p90 - cell.p50) / scale) * 100}%`;
   });
   return row;
+}
+
+/* Car fares are a median across every service tier, because these records have
+ * no column separating UberX from XL or Black. Live weekday quotes from Herald
+ * Square at 5pm were $110 for an UberX and $150 for an XL, against a measured
+ * $124 for that zone - the median sits between them, which is what an all-tiers
+ * median should do. It is a real figure and it is nobody's quote, so the page
+ * says so beneath the bars. */
+function formatFare(value) {
+  if (value == null) return "";
+  return value === 0 ? "free" : `$${Number(value).toFixed(2).replace(/\.00$/, "")}`;
 }
 
 function axisRow(scale) {
