@@ -122,16 +122,33 @@ h1 em { font-style: normal; color: var(--magenta); }
 
 /* ── the then-and-now plate ───────────────────────────────── */
 
-.then-now {
-  display: grid; gap: clamp(1rem, 2.5vw, 1.75rem);
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+/* Three eras on one scale. Drawn rather than tiled, because the comparison is
+   the point and because it teaches the bar language the picker uses below. */
+.then-now { max-width: 860px; }
+.tn-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.35rem; margin-bottom: 1.5rem; }
+.tn-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.tn-when {
+  font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--ink-3);
 }
-.tn-card { background: var(--panel); border: 1px solid var(--rule); padding: 1.4rem 1.5rem 1.6rem; }
-.tn-when { font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
-.tn-value { font-size: clamp(3rem, 8vw, 4.5rem); line-height: 1; letter-spacing: -0.04em; font-weight: 700; margin: 0.4rem 0 0.15rem; }
-.tn-unit { font-size: 0.9rem; color: var(--ink-2); }
-.tn-card-now .tn-value { color: var(--magenta); }
-.tn-note { margin: 0.9rem 0 0; font-size: 0.85rem; color: var(--ink-2); line-height: 1.45; }
+.tn-note { font-size: 0.85rem; color: var(--ink-2); }
+.tn-plot { position: relative; display: flex; align-items: center; gap: 0.9rem; }
+.tn-track { position: relative; flex: 1 1 auto; height: 34px; background: var(--panel); border: 1px solid var(--rule); }
+.tn-fill { position: absolute; inset-block: 0; left: 0; background: var(--ink); }
+.tn-row-now .tn-fill { background: var(--magenta); }
+.tn-value {
+  /* Fixed in rem, not ch. A ch here is measured against this element's own
+     large font size, while the axis margin below is measured against body
+     text, and the two silently disagreed by about seventeen pixels. */
+  flex: 0 0 4.75rem; text-align: right;
+  font-size: clamp(1.9rem, 4.5vw, 2.9rem); line-height: 1;
+  letter-spacing: -0.035em; font-weight: 700;
+}
+.tn-row-now .tn-value { color: var(--magenta); }
+.tn-axis { position: relative; height: 1.7rem; border-top: 1px solid var(--rule); }
+/* Matches the flex gap plus the value column, so the axis lines up with the
+   tracks above it rather than with the row. */
+.tn-axis-inner { position: relative; height: 100%; margin-right: calc(4.75rem + 0.9rem); }
 
 /* ── controls ─────────────────────────────────────────────── */
 
@@ -169,7 +186,7 @@ h1 em { font-style: normal; color: var(--magenta); }
 }
 .verdict strong { color: var(--magenta); font-weight: 700; }
 
-.bars { display: grid; gap: 1.5rem; }
+.bars { display: grid; gap: 1.35rem; }
 
 .bar-row { display: grid; gap: 0.5rem; }
 .bar-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
@@ -195,11 +212,47 @@ h1 em { font-style: normal; color: var(--magenta); }
 .bar-transit .tail { color: var(--blue); background-color: var(--blue-dim); }
 
 .tick {
-  position: absolute; top: calc(100% + 6px);
+  position: absolute; top: calc(100% + 5px);
   font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2);
   white-space: nowrap;
 }
-.bar-row { padding-bottom: 1.4rem; }
+.bar-row { padding-bottom: 1.25rem; }
+
+/* The gap between the two bad-day marks, and the shared axis beneath both
+   bars. Both are positioned in the same percentage space as the tracks, so
+   everything lines up vertically without a layout system. */
+
+.gap-row { position: relative; height: 26px; margin-top: -0.6rem; }
+.gap-span {
+  position: absolute; top: -8px; bottom: 0;
+  border-left: 1px solid var(--ink-2);
+  border-right: 1px solid var(--ink-2);
+}
+.gap-span::before {
+  content: ""; position: absolute; top: 60%; left: 0; right: 0;
+  border-top: 1px dashed var(--ink-2);
+}
+.gap-label {
+  position: absolute; top: 60%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--paper); padding: 0 0.45rem;
+  font-family: var(--mono); font-size: 0.72rem; color: var(--ink);
+  white-space: nowrap;
+}
+
+.axis { position: relative; height: 1.9rem; margin-top: 0.1rem; border-top: 1px solid var(--rule); }
+.axis-tick {
+  position: absolute; top: 0.35rem;
+  font-family: var(--mono); font-size: 0.7rem; color: var(--ink-3);
+  transform: translateX(-50%); white-space: nowrap;
+}
+.axis-tick::before {
+  content: ""; position: absolute; top: -0.35rem; left: 50%;
+  width: 1px; height: 0.3rem; background: var(--rule);
+}
+/* The first and last labels sit inside the axis rather than hanging off it. */
+.axis-first { transform: none; }
+.axis-last { transform: translateX(-100%); }
 
 .bar-empty {
   height: 44px; border: 1px dashed var(--rule); display: flex; align-items: center;

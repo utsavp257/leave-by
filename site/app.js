@@ -204,6 +204,42 @@ function barRow(mode, label, detail, cell, scale) {
   return row;
 }
 
+/* The distance between the two bad-day marks. It is the finding, so it gets
+ * drawn rather than left to the sentence above the chart. */
+function gapRow(car, transit, scale) {
+  const row = document.createElement("div");
+  row.className = "gap-row";
+  const low = Math.min(car.p90, transit.p90);
+  const high = Math.max(car.p90, transit.p90);
+
+  const span = document.createElement("div");
+  span.className = "gap-span";
+  span.style.left = `${(low / scale) * 100}%`;
+  span.style.width = `${((high - low) / scale) * 100}%`;
+  span.innerHTML = `<span class="gap-label">${high - low} min</span>`;
+  row.appendChild(span);
+  return row;
+}
+
+/* One axis under both bars, so the two lengths are comparable by eye and not
+ * only by reading the figures. */
+function axisRow(scale) {
+  const row = document.createElement("div");
+  row.className = "axis";
+  for (let minutes = 0; minutes <= scale; minutes += 30) {
+    const tick = document.createElement("span");
+    tick.className = "axis-tick";
+    tick.style.left = `${(minutes / scale) * 100}%`;
+    // The unit rides on the last tick. A separate label at the right edge
+    // collides with it, and both were competing for the same few pixels.
+    tick.textContent = minutes === scale ? `${minutes} min` : `${minutes}`;
+    if (minutes === 0) tick.classList.add("axis-first");
+    if (minutes === scale) tick.classList.add("axis-last");
+    row.appendChild(tick);
+  }
+  return row;
+}
+
 function money_(value) {
   if (value == null) return "";
   return value === 0 ? "free" : `$${value.toFixed(2)}`;
@@ -240,7 +276,11 @@ function render() {
 
   const car = cell.car;
   const transit = cell.transit;
-  const scale = Math.max(car ? car.p90 : 0, transit ? transit.p90 : 0, 30) * 1.08;
+  // Round the axis up to a whole half hour. An arbitrary margin leaves the
+  // bars stopping in blank space, which reads as a broken chart; a round
+  // maximum makes the leftover part of the track mean something.
+  const longest = Math.max(car ? car.p90 : 0, transit ? transit.p90 : 0, 30);
+  const scale = Math.ceil(longest / 30) * 30;
 
   const via = zone.via;
   bars.appendChild(barRow("car", "Car", "Uber, Lyft or a cab", car, scale));
@@ -253,6 +293,10 @@ function render() {
       scale
     )
   );
+  if (car && transit && Math.abs(car.p90 - transit.p90) >= state.data.meaningful_minutes) {
+    bars.appendChild(gapRow(car, transit, scale));
+  }
+  bars.appendChild(axisRow(scale));
 
   el("verdict").innerHTML = verdictLine(zone, cell);
 
