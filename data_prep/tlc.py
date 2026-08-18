@@ -149,101 +149,82 @@ def connect() -> duckdb.DuckDBPyConnection:
     return con
 
 
-def verify_units(con, source: Source, url: str, tolerance: float = 0.02) -> None:
+def fetch_month(con, source: Source, year: int, month: int):
+    """Pull one month's airport arrivals into the cache.
+
+    The whole month is read exactly once. An earlier version scanned the remote
+    file three times - once to check units, once for travel times, once for
+    fares - which is three times the load on a CDN that throttles, and it did
+    throttle. Everything now lands in a temporary table first and the checks and
+    aggregates run against that.
+    """
+    url = source.url(year, month)
+    available = columns_of(con, url)
+    fare, missing = fare_expression(source, available)
+    if missing:
+        print(f"{source.name} {year}-{month:02d}  no {', '.join(missing)} this month")
+
+    duration = source.duration_seconds
+    airport_ids = ", ".join(str(i) for i in AIRPORTS)
+    company = f"{source.company} AS company," if source.company else "'' AS company,"
+
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE trips AS
+        SELECT
+            DOLocationID AS airport,
+            PULocationID AS origin,
+            {company}
+            {sql_block_expression(source.pickup)} AS block,
+            least(cast(floor(({duration}) / 60.0) AS INTEGER), {MAX_MINUTES}) AS minutes,
+            least(cast(round({fare}) AS INTEGER), {MAX_FARE}) AS dollars,
+            ({duration}) AS seconds,
+            abs(({duration}) - date_diff('second', {source.pickup}, {source.dropoff})) AS gap
+        FROM read_parquet('{url}')
+        WHERE DOLocationID IN ({airport_ids})
+          AND PULocationID IS NOT NULL
+          AND {source.pickup} IS NOT NULL AND {source.dropoff} IS NOT NULL
+          AND ({duration}) > 0 AND ({duration}) < 60 * 60 * 6
+          AND ({fare}) BETWEEN 0 AND 500
+          AND dayofweek({source.pickup}) BETWEEN 1 AND 5
+    """)
+
+    verify_units(con, source, url)
+
+    out = CACHE / f"{source.name}_{year:04d}-{month:02d}.parquet"
+    fares_out = CACHE / f"{source.name}_{year:04d}-{month:02d}_fare.parquet"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    con.execute(f"""COPY (
+        SELECT airport, origin, company, block, minutes, count(*) AS n
+        FROM trips GROUP BY ALL) TO '{out}' (FORMAT PARQUET)""")
+    con.execute(f"""COPY (
+        SELECT airport, origin, block, dollars, count(*) AS n
+        FROM trips GROUP BY ALL) TO '{fares_out}' (FORMAT PARQUET)""")
+
+    written = con.execute(f"SELECT count(*), sum(n) FROM read_parquet('{out}')").fetchone()
+    con.execute("DROP TABLE trips")
+    return written
+
+
+def verify_units(con, source: Source, url: str, tolerance_seconds: float = 12.0) -> None:
     """Confirm the duration column really is seconds.
 
-    Compares it against the gap between the two timestamps on trips long enough
-    that rounding cannot explain a mismatch. If the column ever changes unit, or
-    a source swaps minutes for seconds, this fails loudly here rather than
-    producing a plausible-looking answer that is wrong by a factor of sixty.
+    Runs against the materialised month rather than the remote file, so it costs
+    nothing extra. If the column ever changes unit, or a source swaps minutes for
+    seconds, this fails loudly here rather than producing a plausible-looking
+    answer that is wrong by a factor of sixty.
     """
-    row = con.execute(
-        f"""
-        SELECT count(*) AS n,
-               avg(abs(({source.duration_seconds})
-                   - date_diff('second', {source.pickup}, {source.dropoff}))) AS gap
-        FROM read_parquet('{url}')
-        WHERE {source.pickup} IS NOT NULL
-          AND {source.dropoff} IS NOT NULL
-          AND ({source.duration_seconds}) > 600
-        LIMIT 1
-        """
+    n, gap = con.execute(
+        "SELECT count(*), avg(gap) FROM trips WHERE seconds > 600"
     ).fetchone()
-
-    n, gap = row
     if not n:
         raise RuntimeError(f"{url}: no usable rows to check units against")
-    if gap is None or gap > 600 * tolerance:
+    if gap is None or gap > tolerance_seconds:
         raise RuntimeError(
             f"{url}: {source.duration_seconds} disagrees with the timestamps by "
             f"{gap:.0f} seconds on average. It may no longer be in seconds - "
             f"check the data dictionary before trusting any output."
         )
-
-
-def fetch_month(con, source: Source, year: int, month: int) -> int:
-    """Pull one month's airport arrivals into the cache. Returns rows written."""
-    url = source.url(year, month)
-    verify_units(con, source, url)
-
-    fare, missing = fare_expression(source, columns_of(con, url))
-    if missing:
-        print(f"{source.name} {year}-{month:02d}  no {', '.join(missing)} this month")
-
-    company = f"{source.company} AS company," if source.company else "'' AS company,"
-    airport_ids = ", ".join(str(i) for i in AIRPORTS)
-    out = CACHE / f"{source.name}_{year:04d}-{month:02d}.parquet"
-    out.parent.mkdir(parents=True, exist_ok=True)
-
-    con.execute(
-        f"""
-        COPY (
-            SELECT
-                DOLocationID AS airport,
-                PULocationID AS origin,
-                {company}
-                {sql_block_expression(source.pickup)} AS block,
-                least(cast(floor(({source.duration_seconds}) / 60.0) AS INTEGER),
-                      {MAX_MINUTES}) AS minutes,
-                count(*) AS n
-            FROM read_parquet('{url}')
-            WHERE DOLocationID IN ({airport_ids})
-              AND PULocationID IS NOT NULL
-              AND dayofweek({source.pickup}) BETWEEN 1 AND 5
-              AND ({source.duration_seconds}) > 0
-              AND ({source.duration_seconds}) < 60 * 60 * 6
-              AND ({fare}) BETWEEN 0 AND 500
-            GROUP BY ALL
-        ) TO '{out}' (FORMAT PARQUET)
-        """
-    )
-
-    fares = CACHE / f"{source.name}_{year:04d}-{month:02d}_fare.parquet"
-    con.execute(
-        f"""
-        COPY (
-            SELECT
-                DOLocationID AS airport,
-                PULocationID AS origin,
-                {sql_block_expression(source.pickup)} AS block,
-                least(cast(round({fare}) AS INTEGER), {MAX_FARE}) AS dollars,
-                count(*) AS n
-            FROM read_parquet('{url}')
-            WHERE DOLocationID IN ({airport_ids})
-              AND PULocationID IS NOT NULL
-              AND dayofweek({source.pickup}) BETWEEN 1 AND 5
-              AND ({source.duration_seconds}) > 0
-              AND ({source.duration_seconds}) < 60 * 60 * 6
-              AND ({fare}) BETWEEN 0 AND 500
-            GROUP BY ALL
-        ) TO '{fares}' (FORMAT PARQUET)
-        """
-    )
-
-    written = con.execute(
-        f"SELECT count(*), sum(n) FROM read_parquet('{out}')"
-    ).fetchone()
-    return written
 
 
 def http_status(exc) -> int | None:
@@ -255,7 +236,7 @@ def http_status(exc) -> int | None:
     return int(found.group(1)) if found else None
 
 
-def fetch_with_retry(con, source: Source, year: int, month: int, attempts: int = 4):
+def fetch_with_retry(con, source: Source, year: int, month: int, attempts: int = 5):
     """Fetch a month, telling "not published yet" apart from "slow down".
 
     This distinction matters more than it looks. DuckDB's HTTPException is a
@@ -281,7 +262,9 @@ def fetch_with_retry(con, source: Source, year: int, month: int, attempts: int =
                     f"{source.name} {year}-{month:02d}: HTTP {status} after "
                     f"{attempts} attempts. Stopping rather than leaving a hole."
                 ) from exc
-            pause = 5 * 2 ** (attempt - 1)
+            # 30s, 60s, 120s, 240s. The CDN sheds load for minutes, not
+            # seconds, and an impatient retry just confirms it should keep doing so.
+            pause = 30 * 2 ** (attempt - 1)
             print(f"{source.name} {year}-{month:02d}  HTTP {status}, retrying in {pause}s")
             time.sleep(pause)
     return None, "unreachable"
@@ -309,6 +292,10 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--force", action="store_true", help="refetch months already cached",
     )
+    parser.add_argument(
+        "--pause", type=float, default=4.0,
+        help="seconds between months, to stay under the CDN's rate limit",
+    )
     args = parser.parse_args(argv)
 
     source = SOURCES[args.source]
@@ -331,8 +318,10 @@ def main(argv=None) -> int:
             continue
 
         rows, trips = result
-        print(f"{source.name} {year}-{month:02d}  {rows:>7,} bins  {trips:>9,} trips")
+        print(f"{source.name} {year}-{month:02d}  {rows:>7,} bins  {trips:>9,} trips", flush=True)
         fetched += 1
+        if args.pause:
+            time.sleep(args.pause)
 
     print(f"\n{fetched} fetched, {cached} already cached, {len(skipped)} skipped")
     if skipped:

@@ -48,15 +48,17 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # Cached so a monthly run fetches one new month rather than the whole
-      # corpus. The key carries the month so the cache rolls forward.
-      - uses: actions/cache@v4
+      # Restore and save are separate on purpose. A combined cache step only
+      # saves when the job succeeds, so a backfill that throttled two thirds of
+      # the way through threw away everything it had already fetched. Saving on
+      # `always()` makes a failed run resumable: the next one skips whatever
+      # already landed.
+      - uses: actions/cache/restore@v4
+        id: cache
         with:
           path: data
-          key: tlc-${{ github.event.inputs.end || 'monthly' }}-${{ github.run_id }}
-          restore-keys: |
-            tlc-${{ github.event.inputs.end || 'monthly' }}-
-            tlc-
+          key: tlc-months
+          restore-keys: tlc-
 
       - name: Work out which months to fetch
         id: window
@@ -72,6 +74,13 @@ jobs:
 
       - name: Airport trips
         run: python -m data_prep.tlc "${{ steps.window.outputs.start }}" "${{ steps.window.outputs.end }}"
+
+      # Before the rebuild, so the months are banked even if a later step fails.
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: data
+          key: tlc-months-${{ github.run_id }}
 
       - name: Rebuild
         run: |
